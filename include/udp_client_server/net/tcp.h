@@ -45,7 +45,7 @@ struct tcp_segment
 };
 
 // These states are from the TCP finite state machine http://tcpipguide.com/free/t_TCPOperationalOverviewandtheTCPFiniteStateMachineF-2.htm
-enum
+enum tcp_state
 {
     TCP_ESTABLISHED = 1,
     TCP_SYN_SENT,

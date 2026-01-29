@@ -22,7 +22,15 @@ int main(int argc, char **argv)
         .sin_addr.s_addr = htonl(INADDR_ANY),
     };
 
+    struct sockaddr_in so = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = inet_addr("127.0.0.1"),
+        .sin_port = htons(7654)
+    };
+
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
+    utcp_connect(fd, (struct sockaddr *)&so, sizeof(so));
+
     dump_tcb(fd);
 };
 
