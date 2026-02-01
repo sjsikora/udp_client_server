@@ -18,7 +18,7 @@ int main(int argc, char **argv)
 
     struct sockaddr_in sa = {
         .sin_family = AF_INET,
-        .sin_port   = htons(0),
+        .sin_port   = htons(8292),
         .sin_addr.s_addr = inet_addr("127.0.0.1"),
     };
 
@@ -30,7 +30,5 @@ int main(int argc, char **argv)
 
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     utcp_connect(fd, (struct sockaddr *)&so, sizeof(so));
-
-    dump_tcb(fd);
 };
 

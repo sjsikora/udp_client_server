@@ -55,11 +55,48 @@ void print_safe_chars(uint8_t *buf, size_t len) {
     printf("\n");
 }
 
+void debug_print_tcp_packet(const struct tcphdr *hdr) {
+    if (!hdr) return;
+
+    printf(
+        "[UTCP DEBUG] TCP Packet:\n"
+        "  Source Port      : %u\n"
+        "  Destination Port : %u\n"
+        "  Sequence Number  : %u\n"
+        "  Ack Number       : %u\n"
+        "  Data Offset      : %u bytes\n"
+        "  Flags            : [SYN=%d ACK=%d FIN=%d RST=%d PSH=%d URG=%d]\n"
+        "  Window           : %u\n",
+        ntohs(hdr->th_sport),
+        ntohs(hdr->th_dport),
+        ntohl(hdr->th_seq),
+        ntohl(hdr->th_ack),
+        (hdr->th_off >> 4) * 4, // data offset in bytes
+        (hdr->th_flags & TH_SYN) != 0,
+        (hdr->th_flags & TH_ACK) != 0,
+        (hdr->th_flags & TH_FIN) != 0,
+        (hdr->th_flags & TH_RST) != 0,
+        (hdr->th_flags & TH_PUSH) != 0,
+        (hdr->th_flags & TH_URG) != 0,
+        ntohs(hdr->th_win)
+    );
+}
+
 static void deserialize_utcp_packet(uint8_t *buff, size_t buf_len, tcphdr **out_hdr, uint8_t **out_data, ssize_t *out_data_len) {
 
     if (buf_len < sizeof(tcphdr)) err_sys("Can not parse utcp packet. Are you sure this was sent correctly?");
 
     *out_hdr = (tcphdr *) buff;
+
+    //Convert header fields from network byte order to host byte order
+    (*out_hdr)->th_sport = ntohs((*out_hdr)->th_sport);
+    (*out_hdr)->th_dport = ntohs((*out_hdr)->th_dport);
+    (*out_hdr)->th_seq   = ntohl((*out_hdr)->th_seq);
+    (*out_hdr)->th_ack   = ntohl((*out_hdr)->th_ack);
+    (*out_hdr)->th_win   = ntohs((*out_hdr)->th_win);
+    (*out_hdr)->th_sum   = ntohs((*out_hdr)->th_sum);
+    (*out_hdr)->th_urp   = ntohs((*out_hdr)->th_urp);
+
     *out_data = buff + sizeof(tcphdr);
     *out_data_len = buf_len - sizeof(tcphdr);
 }
@@ -144,7 +181,7 @@ void utcp_package_init(int local_udp_port) {
         err_sys("getsockname failed");
 
     UDP_PORT = ntohs(bound_addr.sin_port);  // Update with the actual port
-    printf("[UTCP] Bound UDP socket to port %u\n", UDP_PORT);
+    printf("[UTCP] UTCP package is initlized and is listening on port %u\n", UDP_PORT);
 
     utcp_initialized = 1;
 }
@@ -254,10 +291,12 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
     memcpy(seg->data, buf, len);
 
     printf(
-        "[UTCP send] sending to true UDP port %u, UTCP port %u\n",
+        "utcp_send: sending to true UDP port %u, UTCP port %u\n",
         tcb->dst_udp_port,
         ntohs(tcb->id.dst_port)
     );
+
+    debug_print_tcp_packet(&seg->hdr);
 
     ssize_t sent_bytes = sendto(
         udp_fd,
@@ -344,7 +383,7 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (sin->sin_family != AF_INET) err_sys("Only AF_INET supported for UTCP connect");
 
     tcb->id.dst_ip = sin->sin_addr.s_addr;
-    tcb->id.dst_port = sin->sin_port;
+    tcb->id.dst_port = htons(sin->sin_port);
     tcb->dst_udp_port = 1970; // UTCP server
 
     // Init sequence numbers:
@@ -440,14 +479,14 @@ int utcp_listen_for_syn(int fd) {
     if (!(hdr->th_dport == tcb->id.src_port)) {
         fprintf(stderr,
             "[UTCP DEBUG] Received packet for port %u, but expected port %u (fd mismatch)\n",
-            ntohs(hdr->th_dport),
-            ntohs(tcb->id.src_port)
+            hdr->th_dport,
+            tcb->id.src_port
         );
         err_sys("Received packet for a different port than fd");
     }
     if(!(hdr->th_flags & TH_SYN)) err_sys("Packet recieved, but no it did not have a SYN");
 
-    tcb -> id.dst_port = ntohs(hdr-> th_sport);
+    tcb -> id.dst_port = hdr-> th_sport;
     tcb -> id.dst_ip = ntohl(from.sin_addr.s_addr);
     tcb -> dst_udp_port = ntohs(from.sin_port);
 

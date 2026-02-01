@@ -16,7 +16,6 @@ int main(int argc, char **argv)
     printf("[UTCP server] starting...\n");
 
     int fd = utcp_socket();
-    printf("[UTCP server] socket fd = %d\n", fd);
 
     /* Bind UTCP “local port” 7654 */
     struct sockaddr_in sa = {
@@ -28,20 +27,12 @@ int main(int argc, char **argv)
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     printf("[UTCP server] bound to UTCP port 7654\n");
 
-    dump_tcb(fd);
-
     printf("[UTCP server] waiting for SYN...\n");
 
     /* Blocking listen for a SYN and perform handshake */
     utcp_listen_for_syn(fd);
 
     printf("[UTCP server] handshake complete\n");
-    dump_tcb(fd);
-
-    /* For now just sleep so process doesn’t exit */
-    while (1) {
-        sleep(1);
-    }
 
     return 0;
 }
