@@ -36,7 +36,7 @@
 
 #define MAX_UTCP_SOCKETS 6
 
-int UDP_PORT = -1;
+int UDP_PORT = -1; // Host order global UDP port
 struct tcb_info *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
 static int utcp_initialized = 0;
 static int udp_fd = -1;
@@ -131,10 +131,8 @@ void utcp_package_init(int local_udp_port) {
     const struct sockaddr_in addr = {
         .sin_family = AF_INET, // Listen on IPv4
         .sin_port   = htons(local_udp_port), // Listen on port UDP_PORT
-        .sin_addr.s_addr = htonl(INADDR_ANY), // Listen on every IP (localhost, network ip, etc)
+        .sin_addr.s_addr = inet_addr("127.0.0.1"), // Listen on localhost
     };
-
-    UDP_PORT = local_udp_port;
 
     if ((udp_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) err_sys("socketerror");
     if (bind(udp_fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0) err_sys("Bind failed for local UDP port");
@@ -234,7 +232,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
     memset(&dst_addr, 0, sizeof(dst_addr));
     dst_addr.sin_family = AF_INET;
     dst_addr.sin_port = htons(tcb->dst_udp_port);
-    dst_addr.sin_addr.s_addr = tcb->id.dst_ip;
+    dst_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     // Allocate memory for segment (header + data)
     size_t segment_size = sizeof(tcphdr) + len;
@@ -244,8 +242,8 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
 
     // Fill TCP header
     memset(&seg->hdr, 0, sizeof(tcphdr));
-    seg->hdr.th_sport = tcb->id.src_port;
-    seg->hdr.th_dport = tcb->id.dst_port;
+    seg->hdr.th_sport = htons(tcb->id.src_port);
+    seg->hdr.th_dport = htons(tcb->id.dst_port);
     seg->hdr.th_seq   = htonl(tcb->snd_nxt);  // convert to network order
     seg->hdr.th_ack   = htonl(tcb->rcv_nxt);  // Last recived for now
     seg->hdr.th_off_flags = (sizeof(tcphdr)/4) << 4; // Convert into 32-bit words
@@ -288,7 +286,8 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
      * Populates the LOCAL side of side of a UTCP socket. Notice, there are
      * some special things happening here. The port that is given by the sockaddr
      * is not a port that you would see anywhere else. Rather, it is a UTCP, our own
-     * special port that we track.
+     * special port that we track. To mimic the BS API, given addr as if it was a true
+     * bind function (given information in network order).
      *
      */
 
@@ -301,11 +300,9 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
     // TODO: Validate port
 
-    uint16_t port = ntohs(sin->sin_port);
-    uint32_t ip = sin->sin_addr.s_addr; // Network order
-
-    tcb->id.src_ip   = ip;
-    tcb->id.src_port = htons(port);
+    // Assume we were given the port in network order TCB holds in host order
+    tcb->id.src_ip = (uint32_t) ntohs(sin->sin_addr.s_addr);
+    tcb->id.src_port = (uint16_t) ntohs(sin->sin_port);
 
     return 0;
 }
@@ -325,7 +322,7 @@ int utcp_syn(int fd) {
     tcb->snd_una = tcb->iss;
     tcb->snd_nxt = tcb->iss;
 
-    utcp_send(fd, "Hey there!", strlen("Hey there!"), TH_SYN);
+    utcp_send(fd, NULL, 0, TH_SYN);
 
     tcb->state = TCP_SYN_SENT;
     tcb->snd_nxt += 1;
@@ -440,12 +437,19 @@ int utcp_listen_for_syn(int fd) {
 
     deserialize_utcp_packet(buff, packet_size, &hdr, &data, &data_len);
 
-    if(!(hdr->th_dport == tcb->id.src_port)) err_sys("Recieved packet, but for a different port than fd");
+    if (!(hdr->th_dport == tcb->id.src_port)) {
+        fprintf(stderr,
+            "[UTCP DEBUG] Received packet for port %u, but expected port %u (fd mismatch)\n",
+            ntohs(hdr->th_dport),
+            ntohs(tcb->id.src_port)
+        );
+        err_sys("Received packet for a different port than fd");
+    }
     if(!(hdr->th_flags & TH_SYN)) err_sys("Packet recieved, but no it did not have a SYN");
 
-    tcb -> id.dst_port = hdr -> th_sport;
-    tcb -> id.dst_ip = from.sin_addr.s_addr;
-    tcb -> dst_udp_port = from.sin_port;
+    tcb -> id.dst_port = ntohs(hdr-> th_sport);
+    tcb -> id.dst_ip = ntohl(from.sin_addr.s_addr);
+    tcb -> dst_udp_port = ntohs(from.sin_port);
 
     printf("[UTCP Server] I got SYN! Here is what is says:\n");
     print_safe_chars(data, data_len);

@@ -19,7 +19,7 @@ int main(int argc, char **argv)
     struct sockaddr_in sa = {
         .sin_family = AF_INET,
         .sin_port   = htons(0),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_addr.s_addr = inet_addr("127.0.0.1"),
     };
 
     struct sockaddr_in so = {

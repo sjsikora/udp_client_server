@@ -62,6 +62,8 @@ enum tcp_state
 
 struct tcb_info
 {
+    // Note, TCB should remain in host order!
+
     struct tcp_connection_id id; /* the unquie 4 tuple that defines the tcp connection */
     uint8_t state;              /* state of the tcp port (see tcp state machine enum) */
     uint16_t dst_udp_port; /* the destination of the true UDP port */
