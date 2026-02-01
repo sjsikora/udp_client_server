@@ -55,6 +55,14 @@ void print_safe_chars(uint8_t *buf, size_t len) {
     printf("\n");
 }
 
+static void deserialize_utcp_packet(uint8_t *buff, size_t buf_len, tcphdr **out_hdr, uint8_t **out_data, ssize_t *out_data_len) {
+
+    if (buf_len < sizeof(tcphdr)) err_sys("Can not parse utcp packet. Are you sure this was sent correctly?");
+
+    *out_hdr = (tcphdr *) buff;
+    *out_data = buff + sizeof(tcphdr);
+    *out_data_len = buf_len - sizeof(tcphdr);
+}
 
 static ssize_t Recvfrom(
     void *buf,
@@ -107,6 +115,7 @@ void dump_tcb(int fd)
     printf("========================\n");
 }
 
+
 void utcp_package_init(int local_udp_port) {
     /**
      * @brief Initializes the utcp (TCP-over-UDP) package
@@ -130,6 +139,15 @@ void utcp_package_init(int local_udp_port) {
     if ((udp_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) err_sys("socketerror");
     if (bind(udp_fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0) err_sys("Bind failed for local UDP port");
 
+    struct sockaddr_in bound_addr;
+    socklen_t addrlen = sizeof(bound_addr);
+
+    if (getsockname(udp_fd, (struct sockaddr *)&bound_addr, &addrlen) < 0)
+        err_sys("getsockname failed");
+
+    UDP_PORT = ntohs(bound_addr.sin_port);  // Update with the actual port
+    printf("[UTCP] Bound UDP socket to port %u\n", UDP_PORT);
+
     utcp_initialized = 1;
 }
 
@@ -151,24 +169,6 @@ static struct tcb_info *utcp_get_tcb(int fd)
         err_sys("UTCP fd not allocated");
 
     return tcb;
-}
-
-static tcphdr *deserialize_tcp_packet(uint8_t **data, ssize_t *data_length) {
-    /**
-     * @brief Deserialize the raw bytes from a UDP response into a tcpheader and alters
-     * the pointer and the length to the data s.t. the pointer and length point to the
-     * payload.
-    */
-
-    if (*data_length < (ssize_t)sizeof(struct tcphdr))
-        err_sys("Cannont deserialize data into tcp because the data is incomplete");
-
-    tcphdr *hdr = (tcphdr *)(*data);
-
-    *data += sizeof(tcphdr);
-    *data_length -= sizeof(tcphdr);
-
-    return hdr;
 }
 
 static struct tcb_info *utcp_get_tcb_in_state(int fd, enum tcp_state required)
@@ -233,7 +233,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
     struct sockaddr_in dst_addr;
     memset(&dst_addr, 0, sizeof(dst_addr));
     dst_addr.sin_family = AF_INET;
-    dst_addr.sin_port = htons(1970);
+    dst_addr.sin_port = htons(tcb->dst_udp_port);
     dst_addr.sin_addr.s_addr = tcb->id.dst_ip;
 
     // Allocate memory for segment (header + data)
@@ -254,6 +254,12 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
 
     // Copy the buffer into the segment
     memcpy(seg->data, buf, len);
+
+    printf(
+        "[UTCP send] sending to true UDP port %u, UTCP port %u\n",
+        tcb->dst_udp_port,
+        ntohs(tcb->id.dst_port)
+    );
 
     ssize_t sent_bytes = sendto(
         udp_fd,
@@ -319,7 +325,7 @@ int utcp_syn(int fd) {
     tcb->snd_una = tcb->iss;
     tcb->snd_nxt = tcb->iss;
 
-    utcp_send(fd, NULL, 0, TH_SYN);
+    utcp_send(fd, "Hey there!", strlen("Hey there!"), TH_SYN);
 
     tcb->state = TCP_SYN_SENT;
     tcb->snd_nxt += 1;
@@ -342,6 +348,7 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
     tcb->id.dst_ip = sin->sin_addr.s_addr;
     tcb->id.dst_port = sin->sin_port;
+    tcb->dst_udp_port = 1970; // UTCP server
 
     // Init sequence numbers:
     tcb->snd_una = 0;
@@ -350,9 +357,28 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
     utcp_syn(fd);
 
+    socklen_t fromlen;
+    struct sockaddr_in from;
+    fromlen = sizeof(from);
 
+    uint8_t *buff = malloc(1500);
+    ssize_t buff_length = 1500;
 
+    printf("Waiting for SYN-ACK\n");
+    ssize_t packet_length = Recvfrom(buff, buff_length, 0, (struct sockaddr*)&from, &fromlen);
+    printf("Got the SYN-ACK\n");
 
+    tcphdr *hdr;
+    uint8_t *data;
+    ssize_t data_length;
+
+    deserialize_utcp_packet(buff, packet_length, &hdr, &data, &data_length);
+
+    if(!(hdr -> th_flags == (TH_SYN | TH_ACK))) err_sys("Server did not SYN-ACK");
+
+    utcp_send(fd, "Hey there!", strlen("Hey there!"), 0);
+
+    free(buff);
 }
 
 static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port,
@@ -400,37 +426,45 @@ int utcp_listen_for_syn(int fd) {
     fromlen = sizeof(from);
 
     // Allocate room for buffer
-    uint8_t *packet = malloc(1500);
+    uint8_t *buff = malloc(1500);
+    ssize_t buff_len = 1500;
 
-    ssize_t packet_size = Recvfrom(packet, 1500, 0, (struct sockaddr*)&from, &fromlen);
-    tcb -> state = TCP_SYN_RECV;
+    ssize_t packet_size = Recvfrom(buff, buff_len, 0, (struct sockaddr*)&from, &fromlen);
+
     printf("[UTCP server] SYN recieved...\n");
+    tcb -> state = TCP_SYN_RECV;
 
-    tcphdr *hdr = deserialize_tcp_packet(&packet, &packet_size);
+    tcphdr *hdr;
+    uint8_t *data;
+    ssize_t data_len;
 
-    if(!(hdr->th_dport & tcb->id.src_port)) err_sys("Recieved packet, but for a different port than fd");
+    deserialize_utcp_packet(buff, packet_size, &hdr, &data, &data_len);
+
+    if(!(hdr->th_dport == tcb->id.src_port)) err_sys("Recieved packet, but for a different port than fd");
     if(!(hdr->th_flags & TH_SYN)) err_sys("Packet recieved, but no it did not have a SYN");
 
     tcb -> id.dst_port = hdr -> th_sport;
     tcb -> id.dst_ip = from.sin_addr.s_addr;
+    tcb -> dst_udp_port = from.sin_port;
+
+    printf("[UTCP Server] I got SYN! Here is what is says:\n");
+    print_safe_chars(data, data_len);
 
     // Sending SYN-ACK
     utcp_send(
         fd,
         NULL,
         0,
-        TH_SYN & TH_ACK
+        TH_SYN | TH_ACK
     );
 
-    // Allocate room for buffer
-    uint8_t *packet2 = malloc(1500);
+    printf("[UTCP server] wait for third message\n");
+    packet_size = Recvfrom(buff, buff_len, 0, (struct sockaddr*)&from, &fromlen);
+    printf("[UTCP server] got the third message of length %d\n", packet_size);
+    deserialize_utcp_packet(buff, packet_size, &hdr, &data, &data_len);
 
-    packet_size = Recvfrom(packet2, 1500, 0, (struct sockaddr*)&from, &fromlen);
-    hdr = deserialize_tcp_packet(&packet, &packet_size);
+    print_safe_chars(data, data_len);
 
-    uint8_t *data = packet;
-    uint8_t datasize = packet;
-
-    print_safe_chars(data, datasize);
+    free(buff);
 }
 

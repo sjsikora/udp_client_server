@@ -64,6 +64,7 @@ struct tcb_info
 {
     struct tcp_connection_id id; /* the unquie 4 tuple that defines the tcp connection */
     uint8_t state;              /* state of the tcp port (see tcp state machine enum) */
+    uint16_t dst_udp_port; /* the destination of the true UDP port */
 
     uint32_t snd_una;               /* oldest unack sequence number */
     uint32_t snd_nxt;               /* the next sequence number to send */
