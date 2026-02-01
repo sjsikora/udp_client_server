@@ -14,6 +14,7 @@ typedef struct
 int utcp_socket(void);
 int utcp_bind(int fd, const struct sockaddr *, socklen_t addrlen);
 int utcp_connect(int fd, const struct sockaddr *, socklen_t addrlen);
+int utcp_listen_for_syn(int fd);
 
 void dump_tcb(int fd);
 

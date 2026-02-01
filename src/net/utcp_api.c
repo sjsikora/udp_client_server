@@ -31,6 +31,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <ctype.h>
+#include <netinet/tcp.h>
 
 #define MAX_UTCP_SOCKETS 6
 #define UDP_PORT 1970
@@ -42,7 +44,31 @@ static int udp_fd = -1;
 static void err_sys(const char* x)
 {
     perror(x);
-    exit(1);
+    exit(EXIT_FAILURE);
+}
+
+void print_safe_chars(uint8_t *buf, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        char c = (char)buf[i];
+        printf("%c", isprint(c) ? c : '.');  // non-printable bytes → '.'
+    }
+    printf("\n");
+}
+
+
+static ssize_t Recvfrom(
+    void *buf,
+    size_t len,
+    int flags,
+    struct sockaddr *__restrict src_addr,
+    socklen_t *__restrict addrlen
+) {
+    ssize_t data = recvfrom(udp_fd, buf, len, flags, src_addr, addrlen);
+
+    // Cast data recieved to TCP header
+    if (data < 0) err_sys("UTCP recvfrom failed");
+
+    return data;
 }
 
 void dump_tcb(int fd)
@@ -126,6 +152,24 @@ static struct tcb_info *utcp_get_tcb(int fd)
     return tcb;
 }
 
+static tcphdr *deserialize_tcp_packet(uint8_t **data, ssize_t *data_length) {
+    /**
+     * @brief Deserialize the raw bytes from a UDP response into a tcpheader and alters
+     * the pointer and the length to the data s.t. the pointer and length point to the
+     * payload.
+    */
+
+    if (*data_length < (ssize_t)sizeof(struct tcphdr))
+        err_sys("Cannont deserialize data into tcp because the data is incomplete");
+
+    tcphdr *hdr = (tcphdr *)(*data);
+
+    *data += sizeof(tcphdr);
+    *data_length -= sizeof(tcphdr);
+
+    return hdr;
+}
+
 static struct tcb_info *utcp_get_tcb_in_state(int fd, enum tcp_state required)
 {
     /**
@@ -188,7 +232,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
     struct sockaddr_in dst_addr;
     memset(&dst_addr, 0, sizeof(dst_addr));
     dst_addr.sin_family = AF_INET;
-    dst_addr.sin_port = tcb->id.dst_port;
+    dst_addr.sin_port = htons(1969);
     dst_addr.sin_addr.s_addr = tcb->id.dst_ip;
 
     // Allocate memory for segment (header + data)
@@ -305,6 +349,10 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     tcb->rcv_nxt = 0;
 
     utcp_syn(fd);
+
+
+
+
 }
 
 static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port,
@@ -330,67 +378,59 @@ static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port,
     return -1;
 }
 
-ssize_t utcp_recv(int fd, void *buf, size_t len, int flags) {
+int utcp_listen_for_syn(int fd) {
     /**
-     * @brief Receive from a specific fd.
-    */
+     * @brief Listens for SYNs on this fd and will execute the
+     * three way handshake.
+     *
+     * It does this through the following steps:
+     *
+     * 1. Listen for SYN connections on the global UDP port
+     * 2. Once a packet comes, parse to TCP header
+     * 3. If wrong port, error out
+     * 4. If correct port, send SYN-ACK back
+    **/
 
-    struct tcb_info *tcb = utcp_get_tcb(fd);
+    struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
+    tcb-> state = TCP_LISTEN;
 
-    uint8_t packet[1500];
+    // Allocate room to see sender
+    socklen_t fromlen;
     struct sockaddr_in from;
-    socklen_t fromlen = sizeof(from);
+    fromlen = sizeof(from);
 
-    ssize_t n = recvfrom(
-        udp_fd,
-        packet,
-        sizeof(packet),
+    // Allocate room for buffer
+    uint8_t *packet = malloc(1500);
+
+    ssize_t packet_size = Recvfrom(packet, 1500, 0, (struct sockaddr*)&from, &fromlen);
+    tcb -> state = TCP_SYN_RECV;
+    printf("[UTCP server] SYN recieved...\n");
+
+    tcphdr *hdr = deserialize_tcp_packet(&packet, &packet_size);
+
+    if(!(hdr->th_dport & tcb->id.src_port)) err_sys("Recieved packet, but for a different port than fd");
+    if(!(hdr->th_flags & TH_SYN)) err_sys("Packet recieved, but no it did not have a SYN");
+
+    tcb -> id.dst_port = hdr -> th_sport;
+    tcb -> id.dst_ip = from.sin_addr.s_addr;
+
+    // Sending SYN-ACK
+    utcp_send(
+        fd,
+        NULL,
         0,
-        (struct sockaddr *)&from,
-        &fromlen
+        TH_SYN & TH_ACK
     );
 
-    if (n < 0) err_sys("UTCP recvfrom failed");
+    // Allocate room for buffer
+    uint8_t *packet2 = malloc(1500);
 
-    if ((size_t)n < sizeof(tcphdr)) err_sys("Header incomplete");
+    packet_size = Recvfrom(packet2, 1500, 0, (struct sockaddr*)&from, &fromlen);
+    hdr = deserialize_tcp_packet(&packet, &packet_size);
 
-    struct tcp_segment *seg = (struct tcp_segment *)packet;
-    tcphdr *hdr = &seg->hdr;
+    uint8_t *data = packet;
+    uint8_t datasize = packet;
 
-    uint32_t src_ip   = from.sin_addr.s_addr;
-    uint16_t src_port = hdr->th_sport;
-    uint32_t dst_ip   = tcb->id.src_ip;
-    uint16_t dst_port = tcb->id.src_port;
-
-    int target_fd = utcp_find_tcb(src_ip, src_port, dst_ip, dst_port);
-    if (target_fd < 0)
-        return 0; // no socket owns this segment
-
-    struct tcb_info *rtcb = utcp_fd_table[target_fd];
-
-    uint32_t seq = ntohl(hdr->th_seq);
-    size_t hdr_len = (hdr->th_off_flags >> 4) * 4;
-    size_t payload_len = n - hdr_len;
-
-    /* --- SYN handling --- */
-    if (hdr->th_flags & TH_SYN) {
-        rtcb->rcv_nxt = seq + 1;
-        return 0;
-    }
-
-    /* --- data handling --- */
-    if (payload_len > 0) {
-        if (seq != rtcb->rcv_nxt) {
-            // out-of-order, drop for now
-            return 0;
-        }
-
-        size_t copy_len = payload_len < len ? payload_len : len;
-        memcpy(buf, packet + hdr_len, copy_len);
-
-        rtcb->rcv_nxt += copy_len;
-        return copy_len;
-    }
-
-    return 0;
+    print_safe_chars(data, datasize);
 }
+
