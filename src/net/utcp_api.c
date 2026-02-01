@@ -35,8 +35,8 @@
 #include <netinet/tcp.h>
 
 #define MAX_UTCP_SOCKETS 6
-#define UDP_PORT 1970
 
+int UDP_PORT = -1;
 struct tcb_info *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
 static int utcp_initialized = 0;
 static int udp_fd = -1;
@@ -107,8 +107,7 @@ void dump_tcb(int fd)
     printf("========================\n");
 }
 
-static void utcp_package_init(void)
-{
+void utcp_package_init(int local_udp_port) {
     /**
      * @brief Initializes the utcp (TCP-over-UDP) package
      *
@@ -122,12 +121,14 @@ static void utcp_package_init(void)
 
     const struct sockaddr_in addr = {
         .sin_family = AF_INET, // Listen on IPv4
-        .sin_port   = htons(UDP_PORT), // Listen on port UDP_PORT
+        .sin_port   = htons(local_udp_port), // Listen on port UDP_PORT
         .sin_addr.s_addr = htonl(INADDR_ANY), // Listen on every IP (localhost, network ip, etc)
     };
 
+    UDP_PORT = local_udp_port;
+
     if ((udp_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) err_sys("socketerror");
-    if (bind(udp_fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0) err_sys("Bind failed for UDP port 1970");
+    if (bind(udp_fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0) err_sys("Bind failed for local UDP port");
 
     utcp_initialized = 1;
 }
@@ -194,7 +195,7 @@ int utcp_socket(void)
      * @note Exits the program if underlying UDP socket creation fails
     */
 
-    utcp_package_init();
+    utcp_package_init(1970);
 
     // Loop the table for utcp file descriptors and find a available one
     int utcp_fd;
@@ -232,7 +233,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
     struct sockaddr_in dst_addr;
     memset(&dst_addr, 0, sizeof(dst_addr));
     dst_addr.sin_family = AF_INET;
-    dst_addr.sin_port = htons(1969);
+    dst_addr.sin_port = htons(1970);
     dst_addr.sin_addr.s_addr = tcb->id.dst_ip;
 
     // Allocate memory for segment (header + data)
@@ -307,7 +308,6 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 int utcp_syn(int fd) {
     /**
      * @brief Send SYN segment to the destination
-     *
     */
 
     struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);

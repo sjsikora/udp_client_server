@@ -13,7 +13,7 @@
 
 int main(int argc, char **argv)
 {
-
+    utcp_package_init(0);
     int fd = utcp_socket();
 
     struct sockaddr_in sa = {

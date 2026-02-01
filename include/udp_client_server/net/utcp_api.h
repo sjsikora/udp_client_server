@@ -15,6 +15,7 @@ int utcp_socket(void);
 int utcp_bind(int fd, const struct sockaddr *, socklen_t addrlen);
 int utcp_connect(int fd, const struct sockaddr *, socklen_t addrlen);
 int utcp_listen_for_syn(int fd);
+void utcp_package_init(int local_udp_port);
 
 void dump_tcb(int fd);
 
