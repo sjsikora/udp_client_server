@@ -6,9 +6,8 @@
 #ifndef TCP_H
 #define TCP_H
 
-#include <stdint.h>
 #include <netinet/in.h>
-
+#include <stdint.h>
 
 struct tcp_connection_id {
     uint32_t src_ip;
@@ -18,35 +17,32 @@ struct tcp_connection_id {
     uint16_t dst_port;
 };
 
-
-typedef struct
-{
-    uint16_t th_sport;              /* source port */
-    uint16_t th_dport;                /* destination port */
-    uint32_t th_seq;                /* sequence number */
-    uint32_t th_ack;                /* acknowledgement number */
-    uint8_t th_off_flags;           /* upper 4 bits offset, lower 4 bits unused */
+typedef struct {
+    uint16_t th_sport;    /* source port */
+    uint16_t th_dport;    /* destination port */
+    uint32_t th_seq;      /* sequence number */
+    uint32_t th_ack;      /* acknowledgement number */
+    uint8_t th_off_flags; /* upper 4 bits offset, lower 4 bits unused */
     uint8_t th_flags;
-    #  define TH_FIN        0x01
-    #  define TH_SYN        0x02
-    #  define TH_RST        0x04
-    #  define TH_PUSH        0x08
-    #  define TH_ACK        0x10
-    #  define TH_URG        0x20
-    uint16_t th_win;                /* window */
-    uint16_t th_sum;                /* checksum */
-    uint16_t th_urp;                /* urgent pointer */
+#define TH_FIN 0x01
+#define TH_SYN 0x02
+#define TH_RST 0x04
+#define TH_PUSH 0x08
+#define TH_ACK 0x10
+#define TH_URG 0x20
+    uint16_t th_win; /* window */
+    uint16_t th_sum; /* checksum */
+    uint16_t th_urp; /* urgent pointer */
 } tcphdr;
 
-struct tcp_segment
-{
+struct tcp_segment {
     tcphdr hdr;
     uint8_t data[];
 };
 
-// These states are from the TCP finite state machine http://tcpipguide.com/free/t_TCPOperationalOverviewandtheTCPFiniteStateMachineF-2.htm
-enum tcp_state
-{
+// These states are from the TCP finite state machine
+// http://tcpipguide.com/free/t_TCPOperationalOverviewandtheTCPFiniteStateMachineF-2.htm
+enum tcp_state {
     TCP_ESTABLISHED = 1,
     TCP_SYN_SENT,
     TCP_SYN_RECV,
@@ -60,20 +56,19 @@ enum tcp_state
     TCP_CLOSING
 };
 
-struct tcb_info
-{
+struct tcb_info {
     // Note, TCB should remain in host order!
 
-    struct tcp_connection_id id; /* the unquie 4 tuple that defines the tcp connection */
-    uint8_t state;              /* state of the tcp port (see tcp state machine enum) */
+    struct tcp_connection_id
+        id;        /* the unquie 4 tuple that defines the tcp connection */
+    uint8_t state; /* state of the tcp port (see tcp state machine enum) */
     uint16_t dst_udp_port; /* the destination of the true UDP port */
 
-    uint32_t snd_una;               /* oldest unack sequence number */
-    uint32_t snd_nxt;               /* the next sequence number to send */
-    uint32_t iss;               /* the inital send sequence */
-    uint32_t rcv_nxt;               /* the next expected sequence */
-    uint32_t irs;               /* initial recv seq */
+    uint32_t snd_una; /* oldest unack sequence number */
+    uint32_t snd_nxt; /* the next sequence number to send */
+    uint32_t iss;     /* the inital send sequence */
+    uint32_t rcv_nxt; /* the next expected sequence */
+    uint32_t irs;     /* initial recv seq */
 };
-
 
 #endif

@@ -3,11 +3,9 @@
 #ifndef MOCK_TCP_H
 #define MOCK_TCP_H
 
-
-typedef struct
-{
-    int udp_sockfd;             /* datagram, udp socket file descriptor */
-    struct tcb_info *sessions;    // dynamic array or hash table of active TCBs
+typedef struct {
+    int udp_sockfd;            /* datagram, udp socket file descriptor */
+    struct tcb_info *sessions; // dynamic array or hash table of active TCBs
     short int n_sessions;
 } mck_tcp_port;
 
