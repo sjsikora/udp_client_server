@@ -13,7 +13,6 @@
 
 int main(int argc, char **argv)
 {
-    printf("[UTCP server] starting...\n");
 
     int fd = utcp_socket();
 
@@ -25,14 +24,9 @@ int main(int argc, char **argv)
     };
 
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
-    printf("[UTCP server] bound to UTCP port 7654\n");
-
-    printf("[UTCP server] waiting for SYN...\n");
 
     /* Blocking listen for a SYN and perform handshake */
     utcp_listen_for_syn(fd);
-
-    printf("[UTCP server] handshake complete\n");
 
     return 0;
 }

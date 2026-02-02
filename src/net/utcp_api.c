@@ -55,11 +55,17 @@ void print_safe_chars(uint8_t *buf, size_t len) {
     printf("\n");
 }
 
-void debug_print_tcp_packet(const struct tcphdr *hdr) {
+void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered) {
     if (!hdr) return;
 
+    uint16_t sport = net_ordered ? ntohs(hdr->th_sport) : hdr->th_sport;
+    uint16_t dport = net_ordered ? ntohs(hdr->th_dport) : hdr->th_dport;
+    uint32_t seq   = net_ordered ? ntohl(hdr->th_seq)   : hdr->th_seq;
+    uint32_t ack   = net_ordered ? ntohl(hdr->th_ack)   : hdr->th_ack;
+    uint16_t win   = net_ordered ? ntohs(hdr->th_win)   : hdr->th_win;
+
     printf(
-        "[UTCP DEBUG] TCP Packet:\n"
+        "[UTCP TCP Packet]:\n"
         "  Source Port      : %u\n"
         "  Destination Port : %u\n"
         "  Sequence Number  : %u\n"
@@ -67,20 +73,22 @@ void debug_print_tcp_packet(const struct tcphdr *hdr) {
         "  Data Offset      : %u bytes\n"
         "  Flags            : [SYN=%d ACK=%d FIN=%d RST=%d PSH=%d URG=%d]\n"
         "  Window           : %u\n",
-        ntohs(hdr->th_sport),
-        ntohs(hdr->th_dport),
-        ntohl(hdr->th_seq),
-        ntohl(hdr->th_ack),
-        (hdr->th_off >> 4) * 4, // data offset in bytes
+        sport,
+        dport,
+        seq,
+        ack,
+        (hdr->th_off_flags >> 4) * 4,
         (hdr->th_flags & TH_SYN) != 0,
         (hdr->th_flags & TH_ACK) != 0,
         (hdr->th_flags & TH_FIN) != 0,
         (hdr->th_flags & TH_RST) != 0,
         (hdr->th_flags & TH_PUSH) != 0,
         (hdr->th_flags & TH_URG) != 0,
-        ntohs(hdr->th_win)
+        win
     );
 }
+
+
 
 static void deserialize_utcp_packet(uint8_t *buff, size_t buf_len, tcphdr **out_hdr, uint8_t **out_data, ssize_t *out_data_len) {
 
@@ -247,6 +255,11 @@ int utcp_socket(void)
 
     tcb->state = TCP_CLOSE;
 
+    // Init acknowledgment numbers
+    tcb->iss = 0x0000;
+    tcb->snd_una = tcb->iss;
+    tcb->snd_nxt = tcb->iss;
+
     utcp_fd_table[utcp_fd] = tcb;
     return utcp_fd;
 
@@ -296,7 +309,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
         ntohs(tcb->id.dst_port)
     );
 
-    debug_print_tcp_packet(&seg->hdr);
+    debug_print_tcp_packet(&seg->hdr, true);
 
     ssize_t sent_bytes = sendto(
         udp_fd,
@@ -340,7 +353,7 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     // TODO: Validate port
 
     // Assume we were given the port in network order TCB holds in host order
-    tcb->id.src_ip = (uint32_t) ntohs(sin->sin_addr.s_addr);
+    tcb->id.src_ip = (uint32_t) ntohl(sin->sin_addr.s_addr);
     tcb->id.src_port = (uint16_t) ntohs(sin->sin_port);
 
     return 0;
@@ -352,14 +365,11 @@ int utcp_syn(int fd) {
      * @brief Send SYN segment to the destination
     */
 
+    printf("[UTCP Client] Sending SYN request");
+
     struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
 
     if (tcb->id.dst_port == 0 || tcb->id.dst_ip == 0) err_sys("Destination IP/Port must be set before SYN");
-
-    // Init acknowledgment numbers
-    tcb->iss = 0x0000;
-    tcb->snd_una = tcb->iss;
-    tcb->snd_nxt = tcb->iss;
 
     utcp_send(fd, NULL, 0, TH_SYN);
 
@@ -400,9 +410,8 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     uint8_t *buff = malloc(1500);
     ssize_t buff_length = 1500;
 
-    printf("Waiting for SYN-ACK\n");
+    printf("[UTCP Client] Waiting for SYN-ACK response\n");
     ssize_t packet_length = Recvfrom(buff, buff_length, 0, (struct sockaddr*)&from, &fromlen);
-    printf("Got the SYN-ACK\n");
 
     tcphdr *hdr;
     uint8_t *data;
@@ -410,11 +419,21 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
     deserialize_utcp_packet(buff, packet_length, &hdr, &data, &data_length);
 
+    tcb->rcv_nxt = ntohl(hdr->th_seq) + 1;
+
+    printf("[UTCP Client] SYN-ACK Packet from server:\n");
+    debug_print_tcp_packet(hdr, false);
+
     if(!(hdr -> th_flags == (TH_SYN | TH_ACK))) err_sys("Server did not SYN-ACK");
 
-    utcp_send(fd, "Hey there!", strlen("Hey there!"), 0);
+    printf("[UTCP Client] Sending ACK\n");
+    utcp_send(fd, NULL, 0, TH_ACK);
+    tcb->rcv_nxt = ntohl(hdr->th_seq) + 1;
 
+    printf("[UTCP Client] Handshake finished.\n");
     free(buff);
+
+    return 0;
 }
 
 static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port,
@@ -465,9 +484,9 @@ int utcp_listen_for_syn(int fd) {
     uint8_t *buff = malloc(1500);
     ssize_t buff_len = 1500;
 
+    printf("[UTCP Server] Waiting for SYN\n");
     ssize_t packet_size = Recvfrom(buff, buff_len, 0, (struct sockaddr*)&from, &fromlen);
 
-    printf("[UTCP server] SYN recieved...\n");
     tcb -> state = TCP_SYN_RECV;
 
     tcphdr *hdr;
@@ -475,6 +494,9 @@ int utcp_listen_for_syn(int fd) {
     ssize_t data_len;
 
     deserialize_utcp_packet(buff, packet_size, &hdr, &data, &data_len);
+
+    printf("[UTCP Server] Received SYN packet:\n");
+    debug_print_tcp_packet(hdr, false);
 
     if (!(hdr->th_dport == tcb->id.src_port)) {
         fprintf(stderr,
@@ -489,9 +511,10 @@ int utcp_listen_for_syn(int fd) {
     tcb -> id.dst_port = hdr-> th_sport;
     tcb -> id.dst_ip = ntohl(from.sin_addr.s_addr);
     tcb -> dst_udp_port = ntohs(from.sin_port);
+    tcb -> irs = ntohs(hdr->th_seq);
+    tcb -> rcv_nxt = tcb -> irs + 1; // Increase sequence number by one
 
-    printf("[UTCP Server] I got SYN! Here is what is says:\n");
-    print_safe_chars(data, data_len);
+    printf("[UTCP Server] Sending SYN-ACK:\n");
 
     // Sending SYN-ACK
     utcp_send(
@@ -501,13 +524,21 @@ int utcp_listen_for_syn(int fd) {
         TH_SYN | TH_ACK
     );
 
-    printf("[UTCP server] wait for third message\n");
+    tcb->snd_nxt += 1;
+
+    printf("[UTCP Server] Waiting for ACK\n");
     packet_size = Recvfrom(buff, buff_len, 0, (struct sockaddr*)&from, &fromlen);
-    printf("[UTCP server] got the third message of length %d\n", packet_size);
     deserialize_utcp_packet(buff, packet_size, &hdr, &data, &data_len);
+
+    printf("[UTCP Server] Recieved ACK packet:\n");
+    debug_print_tcp_packet(hdr, false);
+
+    if(!(hdr->th_flags & TH_SYN))
 
     print_safe_chars(data, data_len);
 
     free(buff);
+
+    return 0;
 }
 
