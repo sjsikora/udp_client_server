@@ -27,4 +27,4 @@ int main(int argc, char **argv) {
 
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     utcp_connect(fd, (struct sockaddr *)&so, sizeof(so));
-};
+}
