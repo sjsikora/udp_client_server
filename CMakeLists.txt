@@ -18,7 +18,6 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 # ---- UTCP core ----
 set(UTCP_SOURCES
     src/net/utcp_api.c
-    src/net/utils/socket_wrappers.c
     src/net/utils/utcp_utils.c
 )
 
