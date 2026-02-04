@@ -32,50 +32,13 @@
 #include <string.h>
 #include <udp_client_server/net/tcp.h>
 #include <udp_client_server/net/utcp_api.h>
-
-#define MAX_UTCP_SOCKETS 6
+#include <udp_client_server/net/utils/utcp_utils.h>
+#include <udp_client_server/util/utils.h>
 
 int UDP_PORT = -1; // Host order global UDP port
-struct tcb_info *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
 static int utcp_initialized = 0;
 static int udp_fd = -1;
-
-static void err_sys(const char *x) {
-    perror(x);
-    exit(EXIT_FAILURE);
-}
-
-void print_safe_chars(uint8_t *buf, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        char c = (char)buf[i];
-        printf("%c", isprint(c) ? c : '.'); // non-printable bytes → '.'
-    }
-    printf("\n");
-}
-
-void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered) {
-    if (!hdr)
-        return;
-
-    uint16_t sport = net_ordered ? ntohs(hdr->th_sport) : hdr->th_sport;
-    uint16_t dport = net_ordered ? ntohs(hdr->th_dport) : hdr->th_dport;
-    uint32_t seq = net_ordered ? ntohl(hdr->th_seq) : hdr->th_seq;
-    uint32_t ack = net_ordered ? ntohl(hdr->th_ack) : hdr->th_ack;
-    uint16_t win = net_ordered ? ntohs(hdr->th_win) : hdr->th_win;
-
-    printf("[UTCP TCP Packet]:\n"
-           "  Source Port      : %u\n"
-           "  Destination Port : %u\n"
-           "  Sequence Number  : %u\n"
-           "  Ack Number       : %u\n"
-           "  Data Offset      : %u bytes\n"
-           "  Flags            : [SYN=%d ACK=%d FIN=%d RST=%d PSH=%d URG=%d]\n"
-           "  Window           : %u\n",
-           sport, dport, seq, ack, (hdr->th_off_flags >> 4) * 4,
-           (hdr->th_flags & TH_SYN) != 0, (hdr->th_flags & TH_ACK) != 0,
-           (hdr->th_flags & TH_FIN) != 0, (hdr->th_flags & TH_RST) != 0,
-           (hdr->th_flags & TH_PUSH) != 0, (hdr->th_flags & TH_URG) != 0, win);
-}
+struct tcb_info *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
 
 static void deserialize_utcp_packet(uint8_t *buff, size_t buf_len,
                                     tcphdr **out_hdr, uint8_t **out_data,
@@ -112,50 +75,7 @@ static ssize_t Recvfrom(void *buf, size_t len, int flags,
     return data;
 }
 
-void dump_tcb(int fd) {
-    /**
-     * @brief Helper function to print out the state of a tcb
-     *
-     */
-
-    if (fd < 0 || fd >= MAX_UTCP_SOCKETS) {
-        printf("dump_tcb: invalid fd %d\n", fd);
-        return;
-    }
-
-    struct tcb_info *tcb = utcp_fd_table[fd];
-    if (!tcb) {
-        printf("dump_tcb: fd %d not in use\n", fd);
-        return;
-    }
-
-    struct in_addr ip;
-    ip.s_addr = tcb->id.src_ip;
-
-    printf("==== UTCP TCB fd=%d ====\n", fd);
-    printf("state      : %u\n", tcb->state);
-    printf("src_ip     : %s\n", inet_ntoa(ip));
-    printf("src_port   : %u\n", ntohs(tcb->id.src_port));
-    printf("dst_ip     : %s\n",
-           tcb->id.dst_ip ? inet_ntoa(*(struct in_addr *)&tcb->id.dst_ip)
-                          : "(unset)");
-    printf("dst_port   : %s\n", tcb->id.dst_port ? "set" : "(unset)");
-    printf("snd_una    : %u\n", tcb->snd_una);
-    printf("snd_nxt    : %u\n", tcb->snd_nxt);
-    printf("rcv_nxt    : %u\n", tcb->rcv_nxt);
-    printf("========================\n");
-}
-
 void utcp_package_init(int local_udp_port) {
-    /**
-     * @brief Initializes the utcp (TCP-over-UDP) package
-     *
-     * This function will allocate a UDP socket, and bind information
-     * to that port. This will allow traffic to follow through the
-     * UDP and into our UTCP sockets.
-     *
-     */
-
     if (utcp_initialized)
         return;
 
@@ -215,16 +135,6 @@ static struct tcb_info *utcp_get_tcb_in_state(int fd, enum tcp_state required) {
 }
 
 int utcp_socket(void) {
-    /**
-     * @brief Creates a UTCP socket.
-     *
-     * This function will create a utcp socket by initilizating a tcb
-     * for the session.
-     *
-     * @return int A utcp file descriptor that references the socket.
-     * @note Exits the program if underlying UDP socket creation fails
-     */
-
     utcp_package_init(1970);
 
     // Loop the table for utcp file descriptors and find a available one
@@ -262,6 +172,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
      * packet off in the global UDP port.
      *
      */
+
 
     struct tcb_info *tcb = utcp_get_tcb(fd);
 
@@ -311,17 +222,6 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
 }
 
 int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
-    /**
-     * @brief Binds a sockaddr to a UTCP port
-     *
-     * Populates the LOCAL side of side of a UTCP socket. Notice, there are
-     * some special things happening here. The port that is given by the
-     * sockaddr is not a port that you would see anywhere else. Rather, it is a
-     * UTCP, our own special port that we track. To mimic the BS API, given addr
-     * as if it was a true bind function (given information in network order).
-     *
-     */
-
     struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
@@ -362,12 +262,6 @@ int utcp_syn(int fd) {
 }
 
 int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
-    /**
-     * @brief Connect to another UTCP socket in addr
-     *
-     * Initlizes the three-way handshake.
-     */
-
     struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
@@ -443,18 +337,6 @@ static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip,
 }
 
 int utcp_listen_for_syn(int fd) {
-    /**
-     * @brief Listens for SYNs on this fd and will execute the
-     * three way handshake.
-     *
-     * It does this through the following steps:
-     *
-     * 1. Listen for SYN connections on the global UDP port
-     * 2. Once a packet comes, parse to TCP header
-     * 3. If wrong port, error out
-     * 4. If correct port, send SYN-ACK back
-     **/
-
     struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
     tcb->state = TCP_LISTEN;
 

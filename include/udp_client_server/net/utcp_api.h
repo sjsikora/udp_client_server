@@ -1,22 +1,63 @@
-
 #include <netinet/in.h>
+#include <udp_client_server/net/tcp.h>
 #ifndef MOCK_TCP_H
 #define MOCK_TCP_H
 
-typedef struct {
-    int udp_sockfd;            /* datagram, udp socket file descriptor */
-    struct tcb_info *sessions; // dynamic array or hash table of active TCBs
-    short int n_sessions;
-} mck_tcp_port;
+#define MAX_UTCP_SOCKETS 6
 
+extern struct tcb_info *utcp_fd_table[MAX_UTCP_SOCKETS];
+
+/*
+ * @brief Creates a UTCP socket.
+ *
+ * This function will create a utcp socket by initilizating a tcb
+ * for the session.
+ *
+ * @return int A utcp file descriptor that references the socket.
+ * @note Exits the program if underlying UDP socket creation fails
+ */
 int utcp_socket(void);
+
+/*
+ * @brief Binds a sockaddr to a UTCP port
+ *
+ * Populates the LOCAL side of side of a UTCP socket. Notice, there are
+ * some special things happening here. The port that is given by the
+ * sockaddr is not a port that you would see anywhere else. Rather, it is a
+ * UTCP, our own special port that we track. To mimic the BS API, given addr
+ * as if it was a true bind function (given information in network order).
+ *
+ */
 int utcp_bind(int fd, const struct sockaddr *, socklen_t addrlen);
+
+/*
+ * @brief Connect to another UTCP socket in addr
+ *
+ * Initlizes the three-way handshake.
+ */
 int utcp_connect(int fd, const struct sockaddr *, socklen_t addrlen);
+
+/*
+ * @brief Listens for SYNs on this fd and will execute the
+ * three way handshake.
+ *
+ * It does this through the following steps:
+ *
+ * 1. Listen for SYN connections on the global UDP port
+ * 2. Once a packet comes, parse to TCP header
+ * 3. If wrong port, error out
+ * 4. If correct port, send SYN-ACK back
+ */
 int utcp_listen_for_syn(int fd);
+
+/*
+ * @brief Initializes the utcp (TCP-over-UDP) package
+ *
+ * This function will allocate a UDP socket, and bind information
+ * to that port. This will allow traffic to follow through the
+ * UDP and into our UTCP sockets.
+ *
+ */
 void utcp_package_init(int local_udp_port);
-
-void dump_tcb(int fd);
-
-struct mck_tcp_port *init_socket(int);
 
 #endif

@@ -23,7 +23,7 @@ typedef struct {
     uint32_t th_seq;      /* sequence number */
     uint32_t th_ack;      /* acknowledgement number */
     uint8_t th_off_flags; /* upper 4 bits offset, lower 4 bits unused */
-    uint8_t th_flags;
+    uint8_t th_flags;     /* note, the eideaness of the flags do not matter because they are one bit */
 #define TH_FIN 0x01
 #define TH_SYN 0x02
 #define TH_RST 0x04

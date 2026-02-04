@@ -15,20 +15,28 @@ endif()
 
 # Global include directory
 include_directories(${PROJECT_SOURCE_DIR}/include)
-
-# ---- UTCP library sources ----
+# ---- UTCP core ----
 set(UTCP_SOURCES
     src/net/utcp_api.c
+    src/net/utils/socket_wrappers.c
+    src/net/utils/utcp_utils.c
 )
 
-# ---- Client executable ----
+# ---- Shared utilities ----
+set(UTIL_SOURCES
+    src/util/util.c
+)
+
+# ---- Client ----
 add_executable(client
     src/client.c
     ${UTCP_SOURCES}
+    ${UTIL_SOURCES}
 )
 
-# ---- Server executable ----
+# ---- Server ----
 add_executable(server
     src/server.c
     ${UTCP_SOURCES}
+    ${UTIL_SOURCES}
 )
