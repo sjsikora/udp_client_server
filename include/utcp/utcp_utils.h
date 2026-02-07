@@ -4,9 +4,16 @@
  * ease of use. If ever these utils would break the system,
  * they belong under a specific named file/folder.
  */
+#ifndef UTCP_UTILS_H
+#define UTCP_UTILS_H
 
 #include <stdbool.h>
 #include <utcp/net/tcp.h>
+
+#define SEQ_LT(a,b) ((int)((a)-(b)) < 0)
+#define SEQ_LEQ(a,b) ((int)((a)-(b)) <= 0)
+#define SEQ_GT(a,b) ((int)((a)-(b)) > 0)
+#define SEQ_GEQ(a,b) ((int)((a)-(b)) >= 0)
 
 /*
  * @brief Print out the contents of a tcp header
@@ -17,3 +24,5 @@ void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered);
  * @brief Helper function to print out the state of a tcb
  */
 void dump_tcb(int fd);
+
+#endif

@@ -33,34 +33,9 @@
 #include <utcp/api.h>
 #include <utcp/utcp_utils.h>
 #include <utils.h>
+#include <utcp/utcp_init.h>
 
-int UDP_PORT = -1; // Host order global UDP port
-static int utcp_initialized = 0;
-static int udp_fd = -1;
-struct tcb_info *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
 
-static void deserialize_utcp_packet(uint8_t *buff, size_t buf_len,
-                                    tcphdr **out_hdr, uint8_t **out_data,
-                                    ssize_t *out_data_len) {
-
-    if (buf_len < sizeof(tcphdr))
-        err_sys(
-            "Can not parse utcp packet. Are you sure this was sent correctly?");
-
-    *out_hdr = (tcphdr *)buff;
-
-    // Convert header fields from network byte order to host byte order
-    (*out_hdr)->th_sport = ntohs((*out_hdr)->th_sport);
-    (*out_hdr)->th_dport = ntohs((*out_hdr)->th_dport);
-    (*out_hdr)->th_seq = ntohl((*out_hdr)->th_seq);
-    (*out_hdr)->th_ack = ntohl((*out_hdr)->th_ack);
-    (*out_hdr)->th_win = ntohs((*out_hdr)->th_win);
-    (*out_hdr)->th_sum = ntohs((*out_hdr)->th_sum);
-    (*out_hdr)->th_urp = ntohs((*out_hdr)->th_urp);
-
-    *out_data = buff + sizeof(tcphdr);
-    *out_data_len = buf_len - sizeof(tcphdr);
-}
 
 static ssize_t Recvfrom(void *buf, size_t len, int flags,
                         struct sockaddr *__restrict src_addr,
@@ -74,35 +49,7 @@ static ssize_t Recvfrom(void *buf, size_t len, int flags,
     return data;
 }
 
-void utcp_package_init(int local_udp_port) {
-    if (utcp_initialized)
-        return;
-
-    const struct sockaddr_in addr = {
-        .sin_family = AF_INET,                     // Listen on IPv4
-        .sin_port = htons(local_udp_port),         // Listen on port UDP_PORT
-        .sin_addr.s_addr = inet_addr("127.0.0.1"), // Listen on localhost
-    };
-
-    if ((udp_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-        err_sys("socketerror");
-    if (bind(udp_fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0)
-        err_sys("Bind failed for local UDP port");
-
-    struct sockaddr_in bound_addr;
-    socklen_t addrlen = sizeof(bound_addr);
-
-    if (getsockname(udp_fd, (struct sockaddr *)&bound_addr, &addrlen) < 0)
-        err_sys("getsockname failed");
-
-    UDP_PORT = ntohs(bound_addr.sin_port); // Update with the actual port
-    printf("[UTCP] UTCP package is initlized and is listening on port %u\n",
-           UDP_PORT);
-
-    utcp_initialized = 1;
-}
-
-static struct tcb_info *utcp_get_tcb(int fd) {
+static struct tcb *utcp_get_tcb(int fd) {
     /**
      * @brief Retieve a utcp tcb by fd
      *
@@ -114,18 +61,18 @@ static struct tcb_info *utcp_get_tcb(int fd) {
     if (fd < 0 || fd >= MAX_UTCP_SOCKETS)
         err_sys("Invalid UTCP fd");
 
-    struct tcb_info *tcb = utcp_fd_table[fd];
+    struct tcb *tcb = utcp_fd_table[fd];
     if (!tcb)
         err_sys("UTCP fd not allocated");
 
     return tcb;
 }
 
-static struct tcb_info *utcp_get_tcb_in_state(int fd, enum tcp_state required) {
+static struct tcb *utcp_get_tcb_in_state(int fd, enum tcp_state required) {
     /**
      * @brief Retieve a utcp tcb by fd and verify it is in a state
      */
-    struct tcb_info *tcb = utcp_get_tcb(fd);
+    struct tcb *tcb = utcp_get_tcb(fd);
 
     if (tcb->state != required)
         err_sys("UTCP socket in invalid state");
@@ -147,11 +94,11 @@ int utcp_socket(void) {
         err_sys("Too many UTCP sockets open");
 
     // Allocate a new TCB for this fd
-    struct tcb_info *tcb = calloc(1, sizeof(struct tcb_info));
+    struct tcb *tcb = calloc(1, sizeof(struct tcb));
     if (!tcb)
         err_sys("calloc failed for TCB");
 
-    tcb->state = TCP_CLOSE;
+    tcb->state = TCP_CLOSED;
 
     // Init acknowledgment numbers
     tcb->iss = 0x0000;
@@ -172,7 +119,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
      *
      */
 
-    struct tcb_info *tcb = utcp_get_tcb(fd);
+    struct tcb *tcb = utcp_get_tcb(fd);
 
     // Reconstruct sockaddr_in from the tcb (possible optimization)
     struct sockaddr_in dst_addr;
@@ -189,8 +136,8 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
 
     // Fill TCP header
     memset(&seg->hdr, 0, sizeof(tcphdr));
-    seg->hdr.th_sport = htons(tcb->id.src_port);
-    seg->hdr.th_dport = htons(tcb->id.dst_port);
+    seg->hdr.th_sport = htons(tcb->src_port);
+    seg->hdr.th_dport = htons(tcb->dst_port);
     seg->hdr.th_seq = htonl(tcb->snd_nxt); // convert to network order
     seg->hdr.th_ack = htonl(tcb->rcv_nxt); // Last recived for now
     seg->hdr.th_off_flags = (sizeof(tcphdr) / 4)
@@ -202,7 +149,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
     memcpy(seg->data, buf, len);
 
     printf("utcp_send: sending to true UDP port %u, UTCP port %u\n",
-           tcb->dst_udp_port, tcb->id.dst_port);
+           tcb->dst_udp_port, tcb->dst_port);
 
     debug_print_tcp_packet(&seg->hdr, true);
 
@@ -220,12 +167,12 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
 }
 
 int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
-    struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
+    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
-    if (tcb->state != TCP_CLOSE)
+    if (tcb->state != TCP_CLOSED)
         err_sys("TCB is in a invalid state for binding");
-    if (tcb->id.src_ip != 0)
+    if (tcb->src_ip != 0)
         err_sys("UTCP socket is already bound");
     if (sin->sin_family != AF_INET)
         err_sys("No support for UTCP ports that are not AF_INET");
@@ -233,8 +180,8 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     // TODO: Validate port
 
     // Assume we were given the port in network order TCB holds in host order
-    tcb->id.src_ip = (uint32_t)ntohl(sin->sin_addr.s_addr);
-    tcb->id.src_port = (uint16_t)ntohs(sin->sin_port);
+    tcb->src_ip = (uint32_t)ntohl(sin->sin_addr.s_addr);
+    tcb->src_port = (uint16_t)ntohs(sin->sin_port);
 
     return 0;
 }
@@ -246,9 +193,9 @@ int utcp_syn(int fd) {
 
     printf("[UTCP Client] Sending SYN request");
 
-    struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
+    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
 
-    if (tcb->id.dst_port == 0 || tcb->id.dst_ip == 0)
+    if (tcb->dst_port == 0 || tcb->dst_ip == 0)
         err_sys("Destination IP/Port must be set before SYN");
 
     utcp_send(fd, NULL, 0, TH_SYN);
@@ -260,14 +207,14 @@ int utcp_syn(int fd) {
 }
 
 int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
-    struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
+    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
     if (sin->sin_family != AF_INET)
         err_sys("Only AF_INET supported for UTCP connect");
 
-    tcb->id.dst_ip = sin->sin_addr.s_addr;
-    tcb->id.dst_port = ntohs(sin->sin_port);
+    tcb->dst_ip = sin->sin_addr.s_addr;
+    tcb->dst_port = ntohs(sin->sin_port);
     tcb->dst_udp_port = 1970; // UTCP server
 
     // Init sequence numbers:
@@ -320,12 +267,12 @@ static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip,
      */
 
     for (int i = 0; i < MAX_UTCP_SOCKETS; i++) {
-        struct tcb_info *tcb = utcp_fd_table[i];
+        struct tcb *tcb = utcp_fd_table[i];
         if (!tcb)
             continue;
 
-        if (tcb->id.src_ip == dst_ip && tcb->id.src_port == dst_port &&
-            tcb->id.dst_ip == src_ip && tcb->id.dst_port == src_port) {
+        if (tcb->src_ip == dst_ip && tcb->src_port == dst_port &&
+            tcb->dst_ip == src_ip && tcb->dst_port == src_port) {
             return i;
         }
     }
@@ -335,7 +282,7 @@ static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip,
 }
 
 int utcp_listen_for_syn(int fd) {
-    struct tcb_info *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSE);
+    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     tcb->state = TCP_LISTEN;
 
     // Allocate room to see sender
@@ -362,18 +309,18 @@ int utcp_listen_for_syn(int fd) {
     printf("[UTCP Server] Received SYN packet:\n");
     debug_print_tcp_packet(hdr, false);
 
-    if (!(hdr->th_dport == tcb->id.src_port)) {
+    if (!(hdr->th_dport == tcb->src_port)) {
         fprintf(stderr,
                 "[UTCP DEBUG] Received packet for port %u, but expected port "
                 "%u (fd mismatch)\n",
-                hdr->th_dport, tcb->id.src_port);
+                hdr->th_dport, tcb->src_port);
         err_sys("Received packet for a different port than fd");
     }
     if (!(hdr->th_flags & TH_SYN))
         err_sys("Packet recieved, but no it did not have a SYN");
 
-    tcb->id.dst_port = hdr->th_sport;
-    tcb->id.dst_ip = ntohl(from.sin_addr.s_addr);
+    tcb->dst_port = hdr->th_sport;
+    tcb->dst_ip = ntohl(from.sin_addr.s_addr);
     tcb->dst_udp_port = ntohs(from.sin_port);
     tcb->irs = ntohs(hdr->th_seq);
     tcb->rcv_nxt = tcb->irs + 1; // Increase sequence number by one

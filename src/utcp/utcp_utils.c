@@ -36,7 +36,7 @@ void dump_tcb(int fd) {
         return;
     }
 
-    struct tcb_info *tcb = utcp_fd_table[fd];
+    struct tcb *tcb = utcp_fd_table[fd];
 
     if (!tcb) {
         printf("dump_tcb: fd %d not in use\n", fd);

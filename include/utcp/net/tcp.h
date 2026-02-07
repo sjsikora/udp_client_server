@@ -1,12 +1,14 @@
 /**
- * This file defines structs that are deal with the TCP portcol.
- * Anything described here could be found in the RFC. It has nothing
- * to do with our own hombrewed structs or logic.
+ * This file is here to define the TCP header, the tcp state, and the
+ * transmission control block.
+ *
+ * Everything defined here comes straight from the RFC.
  */
 #ifndef TCP_H
 #define TCP_H
 
 #include <netinet/in.h>
+#include <netinet/tcp_var.h>
 #include <stdint.h>
 
 struct tcp_connection_id {
@@ -43,32 +45,77 @@ struct tcp_segment {
 // These states are from the TCP finite state machine
 // http://tcpipguide.com/free/t_TCPOperationalOverviewandtheTCPFiniteStateMachineF-2.htm
 enum tcp_state {
-    TCP_ESTABLISHED = 1,
+    TCP_CLOSED = 0,
+    TCP_LISTEN,
     TCP_SYN_SENT,
     TCP_SYN_RECV,
-    TCP_FIN_WAIT1,
-    TCP_FIN_WAIT2,
-    TCP_TIME_WAIT,
-    TCP_CLOSE,
+    TCP_ESTABLISHED,
     TCP_CLOSE_WAIT,
+    TCP_FIN_WAIT1,
+    TCP_CLOSING,
     TCP_LAST_ACK,
-    TCP_LISTEN,
-    TCP_CLOSING
+    TCP_FIN_WAIT2,
+    TCP_TIME_WAIT
 };
 
-struct tcb_info {
-    // Note, TCB should remain in host order!
+#define SEND_BUF_SIZE 65536
+#define RECV_BUF_SIZE 65536
 
-    struct tcp_connection_id
-        id;        /* the unquie 4 tuple that defines the tcp connection */
-    uint8_t state; /* state of the tcp port (see tcp state machine enum) */
-    uint16_t dst_udp_port; /* the destination of the true UDP port */
+/**
+ * @brief Transmission Control Block (TCB)
+ *
+ * The Transmission Control Block (TCB) is a collection of variables for
+ * each (U)TCP socket that defines the state of a TCP connection. Every
+ * socket gets their own TCB, and everything you need to know about what
+ * is happening is in this block.
+ *
+ * @note TCB should always, always, always, remain in host order.
+ */
+struct tcb {
+
+    /* Connection information*/
+    uint32_t src_ip;
+    uint32_t dst_ip;
+    uint16_t src_port; /* these ports do not map to actual port on the kernel, but a UTCP port */
+    uint16_t dst_port;
+
+    /* The real, kernel reconized, destion UDP port that we are sending to */
+    uint16_t dst_udp_port;
+
+    /* TCP socket state */
+    enum tcp_state state;
+
+    /* TCP Connection Varaibles */
 
     uint32_t snd_una; /* oldest unack sequence number */
-    uint32_t snd_nxt; /* the next sequence number to send */
-    uint32_t iss;     /* the inital send sequence */
-    uint32_t rcv_nxt; /* the next expected sequence */
-    uint32_t irs;     /* initial recv seq */
+    uint32_t snd_max; /* highest sequence number sent */
+    uint32_t snd_nxt; /* the next sequence number to send*/
+    uint32_t iss; /* the inital send sequence*/
+
+    uint32_t irs; /* the inital receive sequence */
+    uint32_t rcv_nxt; /* next expected sequence */
+
+    u_int32_t rcv_wnd; /* recieve window */
+    u_int32_t snd_wnd; /* send window*/
+
+    /* Congestion control */
+    uint32_t cwnd;
+    uint32_t ssthresh;
+
+    /* Retransmission timer */
+    uint32_t rto;
+    uint64_t rto_expire;
+
+    /* Send buffer */
+    uint8_t send_buf[SEND_BUF_SIZE];
+    uint32_t send_buf_head; // first unacked
+    uint32_t send_buf_tail; // next write position
+
+    /* Receive buffer */
+    uint8_t recv_buf[RECV_BUF_SIZE];
+    uint32_t recv_buf_head; // next byte to read
+    uint32_t recv_buf_tail; // last received byte
+
 };
 
 #endif

@@ -1,3 +1,26 @@
+/**
+ * Defines the UTCP API. The UTCP (TCP-over-UDP) is a user made construct of
+ * TCP. A UTCP socket will follow the RFC guidelines for TCP, and the only
+ * note is that any UTCP traffic will go through a predestinted single UDP
+ * port.
+ *
+ *                        ┌─────────────────────────┐
+ *    Application A  ───▶ │ UTCP socket (port 10000)│
+ *    Application B  ───▶ │ UTCP socket (port 10001)│
+ *    Application C  ───▶ │ UTCP socket (port 443)  │
+ *                        └─────────────┬───────────┘
+ *                                      │
+ *                              user-space demux
+ *                                      │
+ *                              ONE real UDP socket
+ *                             bound to port UDP_PORT
+ *                                      │
+ *                                    kernel
+ *
+ * The API of the UTCP tries to mimic the berckly sockets API as best as
+ * possible. So, from an application view, you could swap out bind() from BS
+ * with utcp_bind() with no issue (as longe as you also then talk to a UTCP server).
+ */
 #include <netinet/in.h>
 #include <utcp/net/tcp.h>
 #ifndef MOCK_TCP_H
@@ -5,7 +28,7 @@
 
 #define MAX_UTCP_SOCKETS 6
 
-extern struct tcb_info *utcp_fd_table[MAX_UTCP_SOCKETS];
+extern struct tcb *utcp_fd_table[MAX_UTCP_SOCKETS];
 
 /*
  * @brief Creates a UTCP socket.
