@@ -23,17 +23,16 @@
  */
 
 #include <arpa/inet.h>
-#include <ctype.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <udp_client_server/net/tcp.h>
-#include <udp_client_server/net/utcp_api.h>
-#include <udp_client_server/net/utils/utcp_utils.h>
-#include <udp_client_server/util/utils.h>
+#include <utcp/net/tcp.h>
+#include <utcp/api.h>
+#include <utcp/utcp_utils.h>
+#include <utils.h>
 
 int UDP_PORT = -1; // Host order global UDP port
 static int utcp_initialized = 0;
@@ -173,7 +172,6 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
      *
      */
 
-
     struct tcb_info *tcb = utcp_get_tcb(fd);
 
     // Reconstruct sockaddr_in from the tcb (possible optimization)
@@ -204,7 +202,7 @@ static int utcp_send(int fd, const void *buf, size_t len, int flags) {
     memcpy(seg->data, buf, len);
 
     printf("utcp_send: sending to true UDP port %u, UTCP port %u\n",
-           tcb->dst_udp_port, ntohs(tcb->id.dst_port));
+           tcb->dst_udp_port, tcb->id.dst_port);
 
     debug_print_tcp_packet(&seg->hdr, true);
 
@@ -269,7 +267,7 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
         err_sys("Only AF_INET supported for UTCP connect");
 
     tcb->id.dst_ip = sin->sin_addr.s_addr;
-    tcb->id.dst_port = htons(sin->sin_port);
+    tcb->id.dst_port = ntohs(sin->sin_port);
     tcb->dst_udp_port = 1970; // UTCP server
 
     // Init sequence numbers:

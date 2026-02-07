@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <udp_client_server/net/utcp_api.h>
+#include <utcp/api.h>
 
 int main(int argc, char **argv) {
 

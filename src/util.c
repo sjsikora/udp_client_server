@@ -6,9 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <udp_client_server/net/tcp.h>
-#include <udp_client_server/net/utcp_api.h>
-#include <udp_client_server/net/utils/utcp_utils.h>
 
 void err_sys(const char *x) {
     perror(x);

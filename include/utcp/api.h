@@ -1,5 +1,5 @@
 #include <netinet/in.h>
-#include <udp_client_server/net/tcp.h>
+#include <utcp/net/tcp.h>
 #ifndef MOCK_TCP_H
 #define MOCK_TCP_H
 

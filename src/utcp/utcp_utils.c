@@ -3,8 +3,8 @@
 #include <netinet/tcp.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <udp_client_server/net/tcp.h>
-#include <udp_client_server/net/utcp_api.h>
+#include <utcp/net/tcp.h>
+#include <utcp/api.h>
 
 void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered) {
     if (!hdr)

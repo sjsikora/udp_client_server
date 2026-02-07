@@ -3,8 +3,8 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <udp_client_server/config.h>
-#include <udp_client_server/net/utcp_api.h>
+#include <utcp/config.h>
+#include <utcp/api.h>
 #include <unistd.h>
 
 int main(int argc, char **argv) {
