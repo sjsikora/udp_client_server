@@ -25,7 +25,9 @@ int main(int argc, char **argv) {
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
 
     /* Blocking listen for a SYN and perform handshake */
-    utcp_listen_for_syn(fd);
+    utcp_listen(fd);
+
+    utcp_accept(fd);
 
     return 0;
 }

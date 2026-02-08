@@ -10,6 +10,12 @@
 #include <utcp/utcp_utils.h>
 #include <utils.h>
 #include <utcp/utcp_init.h>
+#include <utcp/utcp_output.h>
+
+static void handle_received_data(struct tcb*, tcphdr*, uint8_t*, ssize_t);
+static ssize_t Recvfrom(void*, size_t, int, struct sockaddr* __restrict, socklen_t* __restrict);
+static void deserialize_utcp_packet(uint8_t*, size_t, tcphdr**, uint8_t**, ssize_t*);
+static struct tcb* find_tcb(struct tcphdr*, uint32_t);
 
 int utcp_input(struct tcb *tcb) {
     // Allocate variables we will reuse for every incoming segment
@@ -29,6 +35,7 @@ int utcp_input(struct tcb *tcb) {
         // Wait for incoming packet and deserialize
         ssize_t packet_length = Recvfrom(buff, buff_len, 0, (struct sockaddr *)&from, &fromlen);
         deserialize_utcp_packet(buff, packet_length, &hdr, &data, &data_length);
+        debug_print_tcp_packet(hdr, false);
 
         // Find coorsponding TCB
         struct tcb *tcb = find_tcb(hdr, ntohl(from.sin_addr.s_addr));
@@ -49,12 +56,9 @@ int utcp_input(struct tcb *tcb) {
                     tcb->iss = 0;
                     tcb->snd_nxt = tcb->iss;
                     tcb->snd_una = tcb->iss;
-
-                    // TODO: Send a packet to SYN-ACK
-
-                    tcb->snd_nxt = tcb->iss + 1;
                     tcb->state = TCP_SYN_RECV;
 
+                    utcp_output(tcb);
                 }
                 break;
 
@@ -64,10 +68,10 @@ int utcp_input(struct tcb *tcb) {
                         printf("Connection Established with UTCP server\n");
                         tcb->irs = hdr->th_seq; // Set the server's inital recieve sequence
                         tcb->rcv_nxt = hdr->th_seq + 1; // We expect to recieve
-
-                        // TODO: Send the final ACK utcp_send_packet(tcb, TH_ACK);
-
                         tcb->state = TCP_ESTABLISHED;
+
+                        utcp_output(tcb);
+
                     }
                 }
                 break;
@@ -153,6 +157,8 @@ static void handle_received_data(
         printf("Received out-of-order packet. Expected %u, got %u\n", tcb->rcv_nxt, seq_num);
         return;
     }
+
+    utcp_output(tcb);
 
 }
 

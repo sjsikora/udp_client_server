@@ -79,7 +79,7 @@ struct tcb {
     uint16_t src_port; /* these ports do not map to actual port on the kernel, but a UTCP port */
     uint16_t dst_port;
 
-    /* The real, kernel reconized, destion UDP port that we are sending to */
+    /* The real, kernel reconized, destination UDP port that we are sending to */
     uint16_t dst_udp_port;
 
     /* TCP socket state */

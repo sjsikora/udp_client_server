@@ -71,7 +71,12 @@ int utcp_connect(int fd, const struct sockaddr *, socklen_t addrlen);
  * 3. If wrong port, error out
  * 4. If correct port, send SYN-ACK back
  */
-int utcp_listen_for_syn(int fd);
+int utcp_listen(int fd);
+
+/**
+ *
+ */
+int utcp_accept(int fd);
 
 /*
  * @brief Initializes the utcp (TCP-over-UDP) package

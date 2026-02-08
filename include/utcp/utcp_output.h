@@ -24,24 +24,12 @@
  * @note The resulting uin8_t number that returns should be placed directly on the
  * TCP header.
  */
-uint8_t tcp_outflags[] = {
-    TH_RST | TH_ACK,
-    0,
-    TH_SYN,
-    TH_SYN | TH_ACK,
-    TH_ACK,
-    TH_ACK,
-    TH_FIN | TH_ACK,
-    TH_FIN | TH_ACK,
-    TH_FIN | TH_ACK,
-    TH_ACK,
-    TH_ACK,
-};
+extern uint8_t tcp_outflags[];
 
 /**
  * @brief If acceptable, send a UTCP packet.
  *
  */
-int utcp_output(struct tcb);
+int utcp_output(struct tcb*);
 
 #endif
