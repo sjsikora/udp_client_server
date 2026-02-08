@@ -40,32 +40,43 @@ int utcp_input(struct tcb *tcb) {
                 if(hdr->th_flags & TH_SYN) {
                     printf("Received SYN from %u:%d\n", ntohl(from.sin_addr.s_addr), hdr->th_sport);
 
-
                     tcb->dst_port = hdr->th_sport;
                     tcb->dst_ip = ntohl(from.sin_addr.s_addr);
                     tcb->dst_udp_port = ntohs(from.sin_port);
-                    tcb->irs = ntohl(hdr->th_seq);
+                    tcb->irs = hdr->th_seq;
                     tcb->rcv_nxt = tcb->irs + 1; // Increase sequence number by one
+
+                    tcb->iss = 0;
+                    tcb->snd_nxt = tcb->iss;
+                    tcb->snd_una = tcb->iss;
 
                     // TODO: Send a packet to SYN-ACK
 
+                    tcb->snd_nxt = tcb->iss + 1;
                     tcb->state = TCP_SYN_RECV;
-
 
                 }
                 break;
 
-            case TCP_SYN_SENT: // If ACK of our SYN, connection is completed!
-                if ((hdr->th_flags & TH_SYN) && (hdr->th_flags & TH_ACK)) {
-                    if (hdr->th_ack == tcb->snd_nxt + 1) {
+            case TCP_SYN_SENT:
+                if ((hdr->th_flags & TH_SYN) && (hdr->th_flags & TH_ACK)) { // SYN-ACK Packet
+                    if (hdr->th_ack == tcb->snd_nxt) {
                         printf("Connection Established with UTCP server\n");
-                        tcb->rcv_nxt = hdr->th_seq + 1;
-                        tcb->snd_nxt = hdr->th_ack;
+                        tcb->irs = hdr->th_seq; // Set the server's inital recieve sequence
+                        tcb->rcv_nxt = hdr->th_seq + 1; // We expect to recieve
 
                         // TODO: Send the final ACK utcp_send_packet(tcb, TH_ACK);
 
                         tcb->state = TCP_ESTABLISHED;
                     }
+                }
+                break;
+
+            case TCP_SYN_RECV:
+                if ((hdr->th_flags & TH_ACK) && (hdr->th_ack == tcb->snd_nxt)) { // The final ACK of the 3-way handshake
+                    tcb->snd_una = hdr->th_ack;
+                    tcb->state = TCP_ESTABLISHED;
+                    printf("Handshake complete (Server side)\n");
                 }
             // Fall through to TCP_ESTABLISHED to handle the data in the same segment
             case TCP_ESTABLISHED:
@@ -96,42 +107,53 @@ static void handle_received_data(
         // Update new oldest unacked number
         tcb->snd_una = ack_num;
 
+        // Write data to the recieve buffer
+
         // Slide the window over
-        tcb->send_buf_head = (tcb->send_buf_head + newly_acked_bytes) % SEND_BUF_SIZE; //
+        tcb->send_buf_head = (tcb->send_buf_head + newly_acked_bytes) % SEND_BUF_SIZE;
         tcb->snd_wnd = hdr->th_win;
     } else {
         printf("Packet was sent acking invalid bytes.");
     }
 
     /* Recieve window: Handle my acknowledgment */
-    uint32_t seq_num = hdr->th_seq;
-    uint32_t data_len = data_length;
+    if (data_length <= 0) return;
 
+    uint32_t seq_num = hdr->th_seq;
 
     if (seq_num == tcb->rcv_nxt) { // Is this the packet we are expecting?
 
-        // ...
+        // See how much room we have left in the buffer
+        uint32_t free_space = RECV_BUF_SIZE - (tcb->recv_buf_tail - tcb->recv_buf_head);
 
+        if (data_length <= (ssize_t)free_space) { // For every byte of data, copy into ring buffer
+            for (ssize_t i = 0; i < data_length; i++) {
+                tcb->recv_buf[(tcb->recv_buf_tail + i) % RECV_BUF_SIZE] = data[i];
+            }
+
+            tcb->recv_buf_tail += data_length;
+            tcb->rcv_nxt += data_length;
+
+        } else {
+            // Buffer overflow: Usually, you'd drop the packet or truncate
+            printf("Receive buffer full, dropping data.\n");
+            return;
+        }
     } else if (SEQ_LT(seq_num, tcb->rcv_nxt)) {
         /**
          * Retransmission of old data. We already have this data in our
          * recieve buffer all correct. The system just hasn't recieved our
          * ACK for the data.
          */
+        printf("Received duplicate data (retransmission). Re-acking.\n");
+    } else {
+        /**
+         * Out-of-order data. Simply just drop this packet
+         */
+        printf("Received out-of-order packet. Expected %u, got %u\n", tcb->rcv_nxt, seq_num);
+        return;
     }
 
-
-
-
-
-    if (data_length <= 0) return;
-
-    // Check sequence and ack numbers
-
-
-    // Trim any data needed
-
-    // Place data in the tcb buffer
 }
 
 /**
