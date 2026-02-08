@@ -78,7 +78,6 @@ int utcp_input(struct tcb *tcb) {
 
             case TCP_SYN_RECV:
                 if ((hdr->th_flags & TH_ACK) && (hdr->th_ack == tcb->snd_nxt)) { // The final ACK of the 3-way handshake
-                    tcb->snd_una = hdr->th_ack;
                     tcb->state = TCP_ESTABLISHED;
                     printf("Handshake complete (Server side)\n");
                 }
