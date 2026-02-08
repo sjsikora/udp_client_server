@@ -12,12 +12,13 @@
 #ifndef RING_BUFFER_H
 #define RING_BUFFER_H
 #include <netinet/tcp_var.h>
+#include <stdatomic.h>
 
 typedef struct {
     uint8_t *data;
     ssize_t size;
-    ssize_t head;
-    ssize_t tail;
+    atomic_size_t head; // Atomic
+    atomic_size_t tail; // Atomic
 } ring_buffer_t;
 
 /**
