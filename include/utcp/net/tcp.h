@@ -10,7 +10,6 @@
 #include <netinet/in.h>
 #include <netinet/tcp_var.h>
 #include <stdint.h>
-#include "lib/ring_buffer/ringbuffer.h"
 
 struct tcp_connection_id {
     uint32_t src_ip;

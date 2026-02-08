@@ -5,7 +5,6 @@ CFLAGS := -Wall -Wextra -Iinclude -g -MMD -MP
 # Directories
 SRC_DIR := src
 INC_DIR := include
-LIB_DIR := lib
 BUILD_DIR := build
 
 # Source files
