@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <stdbool.h>
 #include <sys/types.h>
 #include <utcp/config.h>
 #include "utcp/api.h"
@@ -26,8 +27,27 @@ int main(int argc, char **argv) {
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     utcp_connect(fd, (struct sockaddr *)&so, sizeof(so));
 
-    char *msg = "I am requesting /index please!";
+    char *msg = "Will you... come to my cottage this summer?";
 
     utcp_send(fd, msg, strlen(msg));
+
+    // At this point, the three way handshake as been accomplished
+    char buff[100];
+
+
+
+    ssize_t n = utcp_read(fd, buff, sizeof(buff) - 1);
+    printf("Returned %zd\n", n);
+
+    if (n > 0) {
+        // Ensure the string is null-terminated for safe printing
+        buff[n] = '\0';
+        printf("Received %zd bytes: %s\n", n, buff);
+    } else if (n == 0) {
+        printf("Connection closed by peer (EOF).\n");
+    } else {
+        printf("Error reading from UTCP socket.\n");
+    }
+
 
 }

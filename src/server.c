@@ -31,20 +31,21 @@ int main(int argc, char **argv) {
     char buff[100];
 
 
-    while (true) {
-        ssize_t n = utcp_read(fd, buff, sizeof(buff) - 1);
-        printf("Returned %zd\n", n);
+    ssize_t n = utcp_read(fd, buff, sizeof(buff) - 1);
 
-        if (n > 0) {
-            // Ensure the string is null-terminated for safe printing
-            buff[n] = '\0';
-            printf("Received %zd bytes: %s\n", n, buff);
-        } else if (n == 0) {
-            printf("Connection closed by peer (EOF).\n");
-        } else {
-            printf("Error reading from UTCP socket.\n");
-        }
+    if (n > 0) {
+        // Ensure the string is null-terminated for safe printing
+        buff[n] = '\0';
+        printf("Received %zd bytes: %s\n", n, buff);
+    } else if (n == 0) {
+        printf("Connection closed by peer (EOF).\n");
+    } else {
+        printf("Error reading from UTCP socket.\n");
     }
+
+    char *msg = "I am coming to your cottage.";
+
+    utcp_send(fd, msg, strlen(msg));
 
     return 0;
 }

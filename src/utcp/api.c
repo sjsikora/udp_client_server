@@ -112,7 +112,11 @@ int utcp_send(int fd, const void *buf, size_t len) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
 
     // Check if there is room in buffer. Very very limited right now.
-    uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head;
+    uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head
+    ;
+    printf("[DEBUG] SEND_CHECK: tail=%u | head=%u | diff=%u | size=%d | adding=%zu\n",
+        tcb->send_buf_tail, tcb->send_buf_head, current_buffered, SEND_BUF_SIZE, len);
+
     if (current_buffered + len > SEND_BUF_SIZE) err_sys("Full buffer can not add data");
 
     // Add data to the send buffer

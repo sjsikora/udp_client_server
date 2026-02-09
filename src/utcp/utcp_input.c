@@ -83,7 +83,9 @@ int utcp_input(struct tcb *tcb) {
             case TCP_SYN_RECV:
                 if ((hdr->th_flags & TH_ACK) && (hdr->th_ack == tcb->snd_nxt)) { // The final ACK of the 3-way handshake
                     tcb->state = TCP_ESTABLISHED;
+                    tcb->snd_una = hdr->th_ack;
                     printf("Handshake complete (Server side)\n");
+                    break;
                 }
             // Fall through to TCP_ESTABLISHED to handle the data in the same segment
             case TCP_ESTABLISHED:
@@ -117,7 +119,7 @@ static void handle_received_data(
         // Write data to the recieve buffer
 
         // Slide the window over
-        tcb->send_buf_head = (tcb->send_buf_head + newly_acked_bytes) % SEND_BUF_SIZE;
+        tcb->send_buf_head = tcb->send_buf_head + newly_acked_bytes;
         tcb->snd_wnd = hdr->th_win;
     } else {
         printf("Packet was sent acking invalid bytes.");
