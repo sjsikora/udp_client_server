@@ -134,7 +134,7 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
         if (tcb->state == TCP_CLOSE_WAIT || tcb->state == TCP_CLOSED) {
             return 0;
         }
-        usleep(1000);
+        usleep(1000000);
     }
 
     // Look inside the read buffer, read up to passed in buffer length,

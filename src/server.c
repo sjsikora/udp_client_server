@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
     // At this point, the three way handshake as been accomplished
     char buff[100];
 
-/*
+
     while (true) {
         ssize_t n = utcp_read(fd, buff, sizeof(buff) - 1);
 
@@ -44,7 +44,6 @@ int main(int argc, char **argv) {
             printf("Error reading from UTCP socket.\n");
         }
     }
-*/
 
     return 0;
 }
