@@ -25,7 +25,6 @@ int main(int argc, char **argv) {
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     utcp_connect(fd, (struct sockaddr *)&so, sizeof(so));
 
-    // At this point, the three way handshake as been accomplished
     char *msg = "I am requesting /index please!";
 
     utcp_send(fd, msg, strlen(msg));

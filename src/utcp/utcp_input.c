@@ -39,6 +39,7 @@ int utcp_input(struct tcb *tcb) {
 
         // Find coorsponding TCB
         struct tcb *tcb = find_tcb(hdr, ntohl(from.sin_addr.s_addr));
+        PRINT_TCP_VARS(tcb, "INPUT PRE-PROC");
 
         if(tcb == NULL) err_sys("UTCP packet came with no active socket");
 
@@ -66,12 +67,15 @@ int utcp_input(struct tcb *tcb) {
             case TCP_SYN_SENT:
                 if ((hdr->th_flags & TH_SYN) && (hdr->th_flags & TH_ACK)) { // SYN-ACK Packet
                     if (hdr->th_ack == tcb->snd_nxt) {
-                        printf("Connection Established with UTCP server\n");
+
+                        tcb->snd_una = hdr->th_ack;
                         tcb->irs = hdr->th_seq; // Set the server's inital recieve sequence
-                        tcb->rcv_nxt = hdr->th_seq + 1; // We expect to recieve
+                        tcb->rcv_nxt = hdr->th_seq + 1; // We are now ready to recieve the (irs [or SYN bit] + 1 ) byte
+                        tcb->snd_wnd = hdr->th_win;
                         tcb->state = TCP_ESTABLISHED;
                         utcp_output(tcb);
 
+                        printf("Connection Established with UTCP server\n");
                     }
                 }
                 break;

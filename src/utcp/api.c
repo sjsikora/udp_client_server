@@ -42,7 +42,7 @@
  * (in theory) utcp_input should be recieving packets and sending out the
  * corresponding packets for three-way handshake.
  */
-static wait_until_established(struct tcb *tcb) {
+static void wait_until_established(struct tcb *tcb) {
     while (tcb->state != TCP_ESTABLISHED) {
         usleep(1000);
     }

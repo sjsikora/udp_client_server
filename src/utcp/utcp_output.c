@@ -5,6 +5,7 @@
 #include <utcp/utcp_init.h>
 #include <utcp/utcp_utils.h>
 #include <utcp/utcp_output.h>
+#include <utcp/config.h>
 #include <utils.h>
 
 static int pass_to_udp(struct tcp_segment*, size_t, uint32_t, uint16_t);
@@ -30,24 +31,40 @@ int utcp_output(struct tcb *tcb) {
     size_t data_length = 0;
 
     if(tcb->state == TCP_ESTABLISHED) {
-        printf("[DEBUG] Window Check: State=%u | snd_wnd=%u | snd_nxt=%u | snd_una=%u | InFlight=%u\n",
-        tcb->state,
-        tcb->snd_wnd,
-        tcb->snd_nxt,
-        tcb->snd_una,
-        (tcb->snd_nxt - tcb->snd_una));
-
-        uint32_t recivers_window = tcb->snd_wnd;
+        uint32_t receivers_window = tcb->snd_wnd;
         uint32_t unacked_data_in_flight = tcb->snd_nxt - tcb->snd_una;
 
-        if (recivers_window > unacked_data_in_flight) {
-            uint32_t can_send = recivers_window - unacked_data_in_flight;
-            uint32_t buffered_data = tcb->send_buf_tail - (tcb->snd_nxt - tcb->iss);
+        /**
+         * This calcuates how many bytes we have sent on the wire throughtout our entire session.
+         * It only includes payload, not the SYN bit (hence the - 1). We default to zero if we have
+         * only sent the SYN bit
+         */
+        uint32_t data_bytes_sent = (tcb->snd_nxt > tcb->iss) ? (tcb->snd_nxt - tcb->iss - 1) : 0;
+
+        /**
+         * Buffered data holds the number of bytes that the user has placed in our buffer that is
+         * waiting to be sent.
+         */
+        uint32_t buffered_data = 0;
+        if (tcb->send_buf_tail > data_bytes_sent) {
+            buffered_data = tcb->send_buf_tail - data_bytes_sent;
+        }
+
+        printf("[DEBUG] Calc: snd_nxt=%u | iss=%u | data_sent=%u | buf_tail=%u | buffered_ready=%u\n",
+                tcb->snd_nxt, tcb->iss, data_bytes_sent, tcb->send_buf_tail, buffered_data);
+
+        if (receivers_window > unacked_data_in_flight) {
+            uint32_t can_send = receivers_window - unacked_data_in_flight;
+
             data_length = (buffered_data < can_send) ? buffered_data : can_send;
 
-            // Limit to MSS
-            if (data_length > 1460) data_length = 1460;
+            // 4. Clamp to MSS (Maximum Segment Size)
+            if (data_length > MSS) data_length = MSS;
 
+            printf("[DEBUG] Flow: Win=%u | InFlight=%u | CanSend=%u | Result data_length=%zu\n",
+                    receivers_window, unacked_data_in_flight, can_send, data_length);
+        } else {
+            printf("[DEBUG] Window Full: Win=%u | InFlight=%u\n", receivers_window, unacked_data_in_flight);
         }
     }
 
@@ -85,6 +102,8 @@ int utcp_output(struct tcb *tcb) {
 
         if (tcb->snd_nxt > tcb->snd_max) tcb->snd_max = tcb->snd_nxt;
     }
+
+    PRINT_TCP_VARS(tcb, "OUTPUT POST-SEND");
 
     free(seg);
     return bytes_sent;
