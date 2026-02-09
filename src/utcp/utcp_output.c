@@ -50,9 +50,6 @@ int utcp_output(struct tcb *tcb) {
             buffered_data = tcb->send_buf_tail - data_bytes_sent;
         }
 
-        printf("[DEBUG] Calc: snd_nxt=%u | iss=%u | data_sent=%u | buf_tail=%u | buffered_ready=%u\n",
-                tcb->snd_nxt, tcb->iss, data_bytes_sent, tcb->send_buf_tail, buffered_data);
-
         if (receivers_window > unacked_data_in_flight) {
             uint32_t can_send = receivers_window - unacked_data_in_flight;
 
@@ -61,8 +58,6 @@ int utcp_output(struct tcb *tcb) {
             // 4. Clamp to MSS (Maximum Segment Size)
             if (data_length > MSS) data_length = MSS;
 
-            printf("[DEBUG] Flow: Win=%u | InFlight=%u | CanSend=%u | Result data_length=%zu\n",
-                    receivers_window, unacked_data_in_flight, can_send, data_length);
         } else {
             printf("[DEBUG] Window Full: Win=%u | InFlight=%u\n", receivers_window, unacked_data_in_flight);
         }
@@ -93,6 +88,7 @@ int utcp_output(struct tcb *tcb) {
         memcpy(seg->data, &tcb->send_buf[buf_offset], data_length);
     }
 
+    debug_print_tcp_packet(&seg->hdr, true, seg->data, data_length);
     int bytes_sent = pass_to_udp(seg, segment_size, tcb->dst_ip, tcb->dst_udp_port);
 
     // Update TCB counters
@@ -122,8 +118,6 @@ static int pass_to_udp(
     uint32_t dst_ip,
     uint16_t dst_upd_port
 ) {
-
-    debug_print_tcp_packet(&seg->hdr, true);
 
     // NOTE: Possible optimization to cache this data.
     struct sockaddr_in dst_addr;

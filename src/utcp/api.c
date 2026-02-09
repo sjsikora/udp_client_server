@@ -114,8 +114,6 @@ int utcp_send(int fd, const void *buf, size_t len) {
     // Check if there is room in buffer. Very very limited right now.
     uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head
     ;
-    printf("[DEBUG] SEND_CHECK: tail=%u | head=%u | diff=%u | size=%d | adding=%zu\n",
-        tcb->send_buf_tail, tcb->send_buf_head, current_buffered, SEND_BUF_SIZE, len);
 
     if (current_buffered + len > SEND_BUF_SIZE) err_sys("Full buffer can not add data");
 
@@ -144,9 +142,6 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     // Look inside the read buffer, read up to passed in buffer length,
     // or towards the data
     uint32_t avaiable_bytes_to_read = tcb->recv_buf_tail - tcb->recv_buf_head;
-
-    printf("[DEBUG] READ: tail=%u | head=%u | available=%u  \n",
-        tcb->recv_buf_tail, tcb->recv_buf_head, avaiable_bytes_to_read);
 
     size_t num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
 

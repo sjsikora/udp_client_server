@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <utcp/net/tcp.h>
 #include <utcp/api.h>
+#include "utils.h"
 
-void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered) {
+
+void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered, const uint8_t *payload, size_t payload_len) {
     if (!hdr) return;
 
     const char *direction = net_ordered ? ">>> [OUTGOING PACKET]" : "<<< [INCOMING PACKET]";
@@ -23,19 +25,32 @@ void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered) {
            "  Sequence Number  : %u\n"
            "  Ack Number       : %u\n"
            "  Flags            : [ %s%s%s%s%s%s ]\n"
-           "  Window           : %u\n"
-           "  Header Size      : %u bytes\n"
-           "----------------------------------------\n",
-           direction,
-           sport, dport, seq, ack,
+           "  Window           : %u\n",
+           direction, sport, dport, seq, ack,
            (hdr->th_flags & TH_SYN)  ? "SYN " : "",
            (hdr->th_flags & TH_ACK)  ? "ACK " : "",
            (hdr->th_flags & TH_FIN)  ? "FIN " : "",
            (hdr->th_flags & TH_RST)  ? "RST " : "",
            (hdr->th_flags & TH_PUSH) ? "PSH " : "",
            (hdr->th_flags & TH_URG)  ? "URG " : "",
-           win,
-           (hdr->th_off_flags >> 4) * 4);
+           win);
+
+    // Only print payload info if a length is provided
+    if (payload_len > 0) {
+        printf("  Payload Length   : %zu bytes\n", payload_len);
+
+        if (payload != NULL) {
+            printf("  Payload Data     : ");
+            size_t display_len = (payload_len > 64) ? 64 : payload_len; // Limit characters to 64
+            print_safe_chars(payload, display_len);
+
+            if (payload_len > 64) {
+                printf("                     [... truncated ...]\n");
+            }
+        }
+    }
+
+    printf("----------------------------------------\n");
 }
 
 void dump_tcb(int fd) {
@@ -56,7 +71,7 @@ void dump_tcb(int fd) {
 
     printf("==== UTCP TCB fd=%d ====\n", fd);
     printf("state      : %u\n", tcb->state);
-    printf("src_ip     : %s\n", tcb->src_ip);
+    printf("src_ip     : %u\n", tcb->src_ip);
     printf("src_port   : %u\n", tcb->src_port);
     printf("dst_ip     : %s\n",
            tcb->dst_ip ? tcb->dst_ip

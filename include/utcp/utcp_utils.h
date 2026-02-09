@@ -23,7 +23,7 @@
 /*
  * @brief Print out the contents of a tcp header
  */
-void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered);
+void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered, const uint8_t *payload, size_t payload_len);
 
 /*
  * @brief Helper function to print out the state of a tcb

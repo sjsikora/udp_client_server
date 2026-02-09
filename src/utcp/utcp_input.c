@@ -35,7 +35,7 @@ int utcp_input(struct tcb *tcb) {
         // Wait for incoming packet and deserialize
         ssize_t packet_length = Recvfrom(buff, buff_len, 0, (struct sockaddr *)&from, &fromlen);
         deserialize_utcp_packet(buff, packet_length, &hdr, &data, &data_length);
-        debug_print_tcp_packet(hdr, false);
+        debug_print_tcp_packet(hdr, false, data, data_length);
 
         // Find coorsponding TCB
         struct tcb *tcb = find_tcb(hdr, ntohl(from.sin_addr.s_addr));
@@ -116,13 +116,11 @@ static void handle_received_data(
         // Update new oldest unacked number
         tcb->snd_una = ack_num;
 
-        // Write data to the recieve buffer
-
         // Slide the window over
         tcb->send_buf_head = tcb->send_buf_head + newly_acked_bytes;
         tcb->snd_wnd = hdr->th_win;
     } else {
-        printf("Packet was sent acking invalid bytes.");
+        printf("Duplicate ACK\n");
     }
 
     /* Recieve window: Handle my acknowledgment */
