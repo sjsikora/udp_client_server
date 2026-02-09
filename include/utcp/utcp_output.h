@@ -29,6 +29,16 @@ extern uint8_t tcp_outflags[];
 /**
  * @brief If acceptable, send a UTCP packet.
  *
+ * This function is the defacto sender of packets. Many places call to this function,
+ * but it should be thought of as a request to send rather than a guarentee. This function
+ * may send none, one, or many packets to the client.
+ *
+ * We handle this undefined packet send by calling this function on events. For example, we
+ * may have a situation where the reciever's buffer is full. When the application wants to send,
+ * we see that the receiver couldn't handle it, and we don't send a packet. Later, it is up to the
+ * reciever to send up a packet with their new window. On that event, utcp_listen will call tcp_ouput
+ * to then process that send buffer.
+ *
  */
 int utcp_output(struct tcb*);
 

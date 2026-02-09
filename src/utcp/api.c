@@ -1,27 +1,3 @@
-/**
- * Defines the UTCP API. The UTCP (TCP-over-UDP) is a user made construct of
- * TCP. A UTCP socket will follow the RFC guidelines for TCP, and the only
- * note is that any UTCP traffic will go through a predestinted single UDP
- * port.
- *
- *                        ┌─────────────────────────┐
- *    Application A  ───▶ │ UTCP socket (port 10000)│
- *    Application B  ───▶ │ UTCP socket (port 10001)│
- *    Application C  ───▶ │ UTCP socket (port 443)  │
- *                        └─────────────┬───────────┘
- *                                      │
- *                              user-space demux
- *                                      │
- *                              ONE real UDP socket
- *                             bound to port UDP_PORT
- *                                      │
- *                                    kernel
- *
- * The API of the UTCP tries to mimic the berckly sockets API as best as
- * possible. So, from an application view, you could swap out bind() from BS
- * with utcp_bind() with no issue.
- */
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -48,15 +24,14 @@ static void wait_until_established(struct tcb *tcb) {
     }
 }
 
+/**
+ * @brief Retieve a utcp tcb by fd
+ *
+ * Validates the file descriptor and tcb. Errors if
+ * fd is invalid (such as -1) or tcb was never allocated
+ * for the fd
+ */
 static struct tcb *utcp_get_tcb(int fd) {
-    /**
-     * @brief Retieve a utcp tcb by fd
-     *
-     * Validates the file descriptor and tcb. Errors if
-     * fd is invalid (such as -1) or tcb was never allocated
-     * for the fd
-     */
-
     if (fd < 0 || fd >= MAX_UTCP_SOCKETS)
         err_sys("Invalid UTCP fd");
 
@@ -67,10 +42,11 @@ static struct tcb *utcp_get_tcb(int fd) {
     return tcb;
 }
 
+/**
+ * @brief Retieve a utcp tcb by fd and verify it is in a state
+ */
 static struct tcb *utcp_get_tcb_in_state(int fd, enum tcp_state required) {
-    /**
-     * @brief Retieve a utcp tcb by fd and verify it is in a state
-     */
+
     struct tcb *tcb = utcp_get_tcb(fd);
 
     if (tcb->state != required)
@@ -140,7 +116,7 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     }
 
     // Look inside the read buffer, read up to passed in buffer length,
-    // or towards the data
+    // or read all the data avaiable in the buffer
     uint32_t avaiable_bytes_to_read = tcb->recv_buf_tail - tcb->recv_buf_head;
 
     size_t num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
@@ -194,7 +170,6 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (sin->sin_family != AF_INET)
         err_sys("No support for UTCP ports that are not AF_INET");
 
-    // Assume we were given the port in network order TCB holds in host order
     tcb->src_ip = ntohl(sin->sin_addr.s_addr);
     tcb->src_port = ntohs(sin->sin_port);
 
@@ -210,7 +185,7 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
     tcb->dst_ip = ntohl(sin->sin_addr.s_addr);
     tcb->dst_port = ntohs(sin->sin_port);
-    tcb->dst_udp_port = 1970; // UTCP server
+    tcb->dst_udp_port = 1970; // UTCP server hardcoded for now
 
     tcb->state = TCP_SYN_SENT;
     utcp_output(tcb);
@@ -221,22 +196,4 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 int utcp_listen(int fd) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     tcb->state = TCP_LISTEN;
-}
-
-static int utcp_find_tcb(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip,
-                         uint16_t dst_port) {
-
-    for (int i = 0; i < MAX_UTCP_SOCKETS; i++) {
-        struct tcb *tcb = utcp_fd_table[i];
-        if (!tcb)
-            continue;
-
-        if (tcb->src_ip == dst_ip && tcb->src_port == dst_port &&
-            tcb->dst_ip == src_ip && tcb->dst_port == src_port) {
-            return i;
-        }
-    }
-
-    err_sys("Can not find fd with this tuple");
-    return -1;
 }
