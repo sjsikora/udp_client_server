@@ -58,8 +58,8 @@ enum tcp_state {
     TCP_TIME_WAIT
 };
 
-#define SEND_BUF_SIZE 65536
-#define RECV_BUF_SIZE 65536
+#define SEND_BUF_SIZE 65535
+#define RECV_BUF_SIZE 65535
 
 /**
  * @brief Transmission Control Block (TCB)

@@ -78,6 +78,10 @@ int utcp_listen(int fd);
  */
 int utcp_accept(int fd);
 
+int utcp_send(int fd, const void *buf, size_t len);
+
+int utcp_read(int fd, uint8_t *buf, size_t len);
+
 /*
  * @brief Initializes the utcp (TCP-over-UDP) package
  *

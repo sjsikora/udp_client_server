@@ -15,7 +15,7 @@
 static void handle_received_data(struct tcb*, tcphdr*, uint8_t*, ssize_t);
 static ssize_t Recvfrom(void*, size_t, int, struct sockaddr* __restrict, socklen_t* __restrict);
 static void deserialize_utcp_packet(uint8_t*, size_t, tcphdr**, uint8_t**, ssize_t*);
-static struct tcb* find_tcb(struct tcphdr*, uint32_t);
+static struct tcb* find_tcb(tcphdr*, uint32_t);
 
 int utcp_input(struct tcb *tcb) {
     // Allocate variables we will reuse for every incoming segment
@@ -52,6 +52,7 @@ int utcp_input(struct tcb *tcb) {
                     tcb->dst_udp_port = ntohs(from.sin_port);
                     tcb->irs = hdr->th_seq;
                     tcb->rcv_nxt = tcb->irs + 1; // Increase sequence number by one
+                    tcb->snd_wnd = hdr->th_win;
 
                     tcb->iss = 0;
                     tcb->snd_nxt = tcb->iss;
@@ -69,7 +70,6 @@ int utcp_input(struct tcb *tcb) {
                         tcb->irs = hdr->th_seq; // Set the server's inital recieve sequence
                         tcb->rcv_nxt = hdr->th_seq + 1; // We expect to recieve
                         tcb->state = TCP_ESTABLISHED;
-
                         utcp_output(tcb);
 
                     }
@@ -202,7 +202,7 @@ static void deserialize_utcp_packet(
  * @brief Find the TCB structure with four tuple or a active listening socket
  *
  */
-static struct tcb* find_tcb(struct tcphdr *hdr, uint32_t src_ip) {
+static struct tcb* find_tcb(tcphdr *hdr, uint32_t src_ip) {
     struct tcb *listen_match = NULL;
 
     for(int i = 0; i < MAX_UTCP_SOCKETS; i++) {

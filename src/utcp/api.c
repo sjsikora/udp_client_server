@@ -108,7 +108,7 @@ int utcp_socket(void) {
     return utcp_fd;
 }
 
-int utcp_send(int fd, const void *buf, size_t len, int flags) {
+int utcp_send(int fd, const void *buf, size_t len) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
 
     // Check if there is room in buffer. Very very limited right now.
@@ -124,6 +124,31 @@ int utcp_send(int fd, const void *buf, size_t len, int flags) {
 
     // Try to send the data
     return utcp_output(tcb);
+}
+
+int utcp_read(int fd, uint8_t *buf, size_t len) {
+    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
+
+    // Spin wait for data if there is nothing to read in the buffer
+    while (tcb->recv_buf_head == tcb->recv_buf_tail) {
+        if (tcb->state == TCP_CLOSE_WAIT || tcb->state == TCP_CLOSED) {
+            return 0;
+        }
+        usleep(1000);
+    }
+
+    // Look inside the read buffer, read up to passed in buffer length,
+    // or towards the data
+    uint32_t avaiable_bytes_to_read = tcb->send_buf_head - tcb->send_buf_tail;
+    size_t num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
+
+    for (size_t i = 0; i < num_bytes_to_read; i++) {
+        buf[i] = tcb->recv_buf[(tcb->recv_buf_head + i) % RECV_BUF_SIZE];
+    }
+
+    tcb->recv_buf_head += num_bytes_to_read;
+
+    // TODO: Increase rcv_wnd variable
 }
 
 int utcp_accept(int fd) {

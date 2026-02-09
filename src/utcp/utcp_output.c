@@ -30,6 +30,13 @@ int utcp_output(struct tcb *tcb) {
     size_t data_length = 0;
 
     if(tcb->state == TCP_ESTABLISHED) {
+        printf("[DEBUG] Window Check: State=%u | snd_wnd=%u | snd_nxt=%u | snd_una=%u | InFlight=%u\n",
+        tcb->state,
+        tcb->snd_wnd,
+        tcb->snd_nxt,
+        tcb->snd_una,
+        (tcb->snd_nxt - tcb->snd_una));
+
         uint32_t recivers_window = tcb->snd_wnd;
         uint32_t unacked_data_in_flight = tcb->snd_nxt - tcb->snd_una;
 
@@ -40,6 +47,7 @@ int utcp_output(struct tcb *tcb) {
 
             // Limit to MSS
             if (data_length > 1460) data_length = 1460;
+
         }
     }
 
@@ -56,15 +64,17 @@ int utcp_output(struct tcb *tcb) {
     seg->hdr.th_ack   = htonl(tcb->rcv_nxt);
     seg->hdr.th_off_flags = (sizeof(tcphdr) / 4) << 4;
     seg->hdr.th_flags = flags;
-    seg->hdr.th_win   = htons(RECV_BUF_SIZE);
     seg->hdr.th_sum = 0;
 
+    // Window calcuations
+    uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
+    uint32_t current_free_space = RECV_BUF_SIZE - bytes_in_buffer;
+    seg->hdr.th_win = htons((uint16_t)current_free_space);
 
     if (data_length > 0) {
         uint32_t buf_offset = (tcb->snd_nxt - tcb->iss) % SEND_BUF_SIZE;
         memcpy(seg->data, &tcb->send_buf[buf_offset], data_length);
     }
-
 
     int bytes_sent = pass_to_udp(seg, segment_size, tcb->dst_ip, tcb->dst_udp_port);
 
