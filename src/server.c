@@ -33,6 +33,7 @@ int main(int argc, char **argv) {
 
     while (true) {
         ssize_t n = utcp_read(fd, buff, sizeof(buff) - 1);
+        printf("Returned %zd\n", n);
 
         if (n > 0) {
             // Ensure the string is null-terminated for safe printing

@@ -139,7 +139,11 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
 
     // Look inside the read buffer, read up to passed in buffer length,
     // or towards the data
-    uint32_t avaiable_bytes_to_read = tcb->send_buf_head - tcb->send_buf_tail;
+    uint32_t avaiable_bytes_to_read = tcb->recv_buf_tail - tcb->recv_buf_head;
+
+    printf("[DEBUG] READ: tail=%u | head=%u | available=%u  \n",
+        tcb->recv_buf_tail, tcb->recv_buf_head, avaiable_bytes_to_read);
+
     size_t num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
 
     for (size_t i = 0; i < num_bytes_to_read; i++) {
@@ -149,6 +153,9 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     tcb->recv_buf_head += num_bytes_to_read;
 
     // TODO: Increase rcv_wnd variable
+
+    return avaiable_bytes_to_read;
+
 }
 
 int utcp_accept(int fd) {

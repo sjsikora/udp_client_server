@@ -89,7 +89,7 @@ int utcp_output(struct tcb *tcb) {
     seg->hdr.th_win = htons((uint16_t)current_free_space);
 
     if (data_length > 0) {
-        uint32_t buf_offset = (tcb->snd_nxt - tcb->iss) % SEND_BUF_SIZE;
+        uint32_t buf_offset = (tcb->snd_nxt - tcb->iss - 1) % SEND_BUF_SIZE;
         memcpy(seg->data, &tcb->send_buf[buf_offset], data_length);
     }
 
