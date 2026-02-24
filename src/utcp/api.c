@@ -127,7 +127,19 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
 
     tcb->recv_buf_head += num_bytes_to_read;
 
-    // TODO: Increase rcv_wnd variable
+    // When the application has read the payload, we can free up the receieve window
+    // that is advertised to the sender. Recalculate this here.
+    uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
+    tcb->rcv_wnd = RECV_BUF_SIZE - bytes_in_buffer;
+
+    // Silly Window Syndrome prevention. If the application is reading bytes one at a
+    // time, we don't want to be sending off an recv window update for every single byte.
+    // So, we add this condition to ensure we only send an window update if it is significant
+    // that being if the rcv_wnd is one MSS long or we were previously at 0 rcv_wnd.
+    if (tcb->rcv_wnd >= MSS || (tcb->rcv_wnd < MSS && avaiable_bytes_to_read == RECV_BUF_SIZE)) {
+        // Trigger a window update packet to the sender
+        utcp_output(tcb);
+    }
 
     return avaiable_bytes_to_read;
 

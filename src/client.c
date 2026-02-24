@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <utcp/config.h>
 #include "utcp/api.h"
+#include "utcp/utcp_init.h"
 #include <unistd.h>
 
 int main(int argc, char **argv) {
