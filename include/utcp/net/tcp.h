@@ -20,25 +20,25 @@ struct tcp_connection_id {
 };
 
 typedef struct {
-    uint16_t th_sport;    /* source port */
-    uint16_t th_dport;    /* destination port */
-    uint32_t th_seq;      /* sequence number */
-    uint32_t th_ack;      /* acknowledgement number */
-    uint8_t th_off_flags; /* upper 4 bits offset, lower 4 bits unused */
-    uint8_t th_flags;     /* note, the eideaness of the flags do not matter because they are one bit */
-#define TH_FIN 0x01
-#define TH_SYN 0x02
-#define TH_RST 0x04
+    uint16_t th_sport;     /* source port */
+    uint16_t th_dport;     /* destination port */
+    uint32_t th_seq;       /* sequence number */
+    uint32_t th_ack;       /* acknowledgement number */
+    uint8_t  th_off_flags; /* upper 4 bits offset, lower 4 bits unused */
+    uint8_t  th_flags;     /* note, the eideaness of the flags do not matter because they are one bit */
+#define TH_FIN  0x01
+#define TH_SYN  0x02
+#define TH_RST  0x04
 #define TH_PUSH 0x08
-#define TH_ACK 0x10
-#define TH_URG 0x20
+#define TH_ACK  0x10
+#define TH_URG  0x20
     uint16_t th_win; /* window */
     uint16_t th_sum; /* checksum */
     uint16_t th_urp; /* urgent pointer */
 } tcphdr;
 
 struct tcp_segment {
-    tcphdr hdr;
+    tcphdr  hdr;
     uint8_t data[];
 };
 
@@ -90,9 +90,9 @@ struct tcb {
     uint32_t snd_una; /* oldest unack sequence number */
     uint32_t snd_max; /* highest sequence number sent */
     uint32_t snd_nxt; /* the next sequence number to send*/
-    uint32_t iss; /* the inital send sequence*/
+    uint32_t iss;     /* the inital send sequence*/
 
-    uint32_t irs; /* the inital receive sequence */
+    uint32_t irs;     /* the inital receive sequence */
     uint32_t rcv_nxt; /* next expected sequence */
 
     u_int32_t rcv_wnd; /* recieve window */
@@ -102,20 +102,21 @@ struct tcb {
     uint32_t cwnd;
     uint32_t ssthresh;
 
-    /* Retransmission timer */
-    uint32_t rto;
-    uint64_t rto_expire;
+    /* Timers */
+
+    // Each entry in the t_timer array is the number of 500-ms clock
+    // ticks until the timer expires.
+    short t_timer[4]; /* The four timer counters */
 
     /* Send buffer */
-    uint8_t send_buf[SEND_BUF_SIZE];
+    uint8_t  send_buf[SEND_BUF_SIZE];
     uint32_t send_buf_head; // first unacked
     uint32_t send_buf_tail; // next write position
 
     /* Receive buffer */
-    uint8_t recv_buf[RECV_BUF_SIZE];
+    uint8_t  recv_buf[RECV_BUF_SIZE];
     uint32_t recv_buf_head; // next byte to read
     uint32_t recv_buf_tail; // last received byte
-
 };
 
 #endif

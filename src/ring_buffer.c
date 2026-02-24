@@ -1,6 +1,6 @@
 #include "ring_buffer.h"
-#include <string.h>
 #include <assert.h>
+#include <string.h>
 
 void ring_buffer_init(ring_buffer_t *buffer, uint8_t *buf, ssize_t buf_size) {
     buffer->data = buf;
@@ -21,7 +21,7 @@ ssize_t rb_free_space(ring_buffer_t *rb) {
 }
 
 static ssize_t rb_filled_space(ring_buffer_t *rb) {
-    size_t t = atomic_load_explicit(&rb->tail, memory_order_acquire);
+    size_t  t = atomic_load_explicit(&rb->tail, memory_order_acquire);
     ssize_t h = atomic_load_explicit(&rb->head, memory_order_relaxed);
 
     if (t >= h) {
@@ -38,8 +38,10 @@ ssize_t rb_write(ring_buffer_t *rb, uint8_t *src_buff, ssize_t len) {
     // Calculate free space locally to avoid extra atomic loads
     ssize_t free_space = (t >= h) ? ((rb->size - 1) - (t - h)) : (h - t - 1);
 
-    if (len > free_space) len = free_space;
-    if (len <= 0) return 0;
+    if (len > free_space)
+        len = free_space;
+    if (len <= 0)
+        return 0;
 
     ssize_t to_end = rb->size - t;
     if (len <= to_end) {
@@ -60,8 +62,10 @@ ssize_t rb_read(ring_buffer_t *rb, uint8_t *dst_buff, ssize_t len) {
     // Calculate available space locally
     ssize_t available = (t >= h) ? (t - h) : (rb->size - (h - t));
 
-    if (len > available) len = available;
-    if (len <= 0) return 0;
+    if (len > available)
+        len = available;
+    if (len <= 0)
+        return 0;
 
     ssize_t to_end = rb->size - h;
     if (len <= to_end) {
@@ -81,11 +85,12 @@ void rb_discard(ring_buffer_t *rb, ssize_t len) {
 
     ssize_t available = (t >= h) ? (t - h) : (rb->size - (h - t));
 
-    if (len > available) len = available;
-    if (len <= 0) return;
+    if (len > available)
+        len = available;
+    if (len <= 0)
+        return;
 
     // Use RELEASE to ensure any processing of the data is finished
     // before we officially "free" the space by moving the head.
     atomic_store_explicit(&rb->head, (h + len) % rb->size, memory_order_release);
 }
-

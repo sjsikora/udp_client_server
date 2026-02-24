@@ -15,8 +15,8 @@
 #include <stdatomic.h>
 
 typedef struct {
-    uint8_t *data;
-    ssize_t size;
+    uint8_t      *data;
+    ssize_t       size;
     atomic_size_t head; // Atomic
     atomic_size_t tail; // Atomic
 } ring_buffer_t;

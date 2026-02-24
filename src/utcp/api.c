@@ -5,13 +5,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <utcp/net/tcp.h>
+#include <unistd.h>
 #include <utcp/api.h>
+#include <utcp/net/tcp.h>
+#include <utcp/utcp_init.h>
+#include <utcp/utcp_output.h>
 #include <utcp/utcp_utils.h>
 #include <utils.h>
-#include <utcp/utcp_init.h>
-#include <unistd.h>
-#include <utcp/utcp_output.h>
 
 /**
  * Spin wait until the tcb is established. We are able to do this because
@@ -88,10 +88,10 @@ int utcp_send(int fd, const void *buf, size_t len) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
 
     // Check if there is room in buffer. Very very limited right now.
-    uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head
-    ;
+    uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head;
 
-    if (current_buffered + len > SEND_BUF_SIZE) err_sys("Full buffer can not add data");
+    if (current_buffered + len > SEND_BUF_SIZE)
+        err_sys("Full buffer can not add data");
 
     // Add data to the send buffer
     for (size_t i = 0; i < len; i++) {
@@ -142,7 +142,6 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     }
 
     return avaiable_bytes_to_read;
-
 }
 
 int utcp_accept(int fd) {
@@ -153,7 +152,8 @@ int utcp_accept(int fd) {
      * that is always listening.
      */
     if (tcb->state != TCP_LISTEN && tcb->state != TCP_SYN_RECV) {
-        if (tcb->state == TCP_ESTABLISHED) return fd;
+        if (tcb->state == TCP_ESTABLISHED)
+            return fd;
         err_sys("utcp_accept called on a socket that isn't listening");
     }
 
@@ -172,7 +172,7 @@ int utcp_accept(int fd) {
 }
 
 int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
-    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
+    struct tcb               *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
     if (tcb->state != TCP_CLOSED)
@@ -189,7 +189,7 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 }
 
 int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
-    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
+    struct tcb               *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
     if (sin->sin_family != AF_INET)

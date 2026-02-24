@@ -68,7 +68,7 @@ int utcp_connect(int fd, const struct sockaddr *, socklen_t addrlen);
  * state. If any connections come through on this socket, this socket will
  * automatically perform the three wayhandshake (TODO we should wait on SYN_RECV
  * state until the user calls accept).
-*/
+ */
 int utcp_listen(int fd);
 
 /**

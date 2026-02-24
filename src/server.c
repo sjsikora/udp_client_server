@@ -1,10 +1,10 @@
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -29,7 +29,6 @@ int main(int argc, char **argv) {
 
     // At this point, the three way handshake as been accomplished
     char buff[100];
-
 
     ssize_t n = utcp_read(fd, buff, sizeof(buff) - 1);
 

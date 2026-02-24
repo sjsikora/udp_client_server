@@ -40,6 +40,6 @@ extern uint8_t tcp_outflags[];
  * to then process that send buffer.
  *
  */
-int utcp_output(struct tcb*);
+int utcp_output(struct tcb *);
 
 #endif

@@ -5,33 +5,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <utcp/net/tcp.h>
 #include <utcp/api.h>
-#include <utcp/utcp_utils.h>
-#include <utils.h>
+#include <utcp/net/tcp.h>
 #include <utcp/utcp_init.h>
 #include <utcp/utcp_output.h>
+#include <utcp/utcp_utils.h>
+#include <utils.h>
 
-static void handle_received_data(struct tcb*, tcphdr*, uint8_t*, ssize_t);
-static ssize_t Recvfrom(void*, size_t, int, struct sockaddr* __restrict, socklen_t* __restrict);
-static void deserialize_utcp_packet(uint8_t*, size_t, tcphdr**, uint8_t**, ssize_t*);
-static struct tcb* find_tcb(tcphdr*, uint32_t);
+static void        handle_received_data(struct tcb *, tcphdr *, uint8_t *, ssize_t);
+static ssize_t     Recvfrom(void *, size_t, int, struct sockaddr *__restrict, socklen_t *__restrict);
+static void        deserialize_utcp_packet(uint8_t *, size_t, tcphdr **, uint8_t **, ssize_t *);
+static struct tcb *find_tcb(tcphdr *, uint32_t);
 
 int utcp_input(struct tcb *tcb) {
     // Allocate variables we will reuse for every incoming segment
-    socklen_t fromlen;
+    socklen_t          fromlen;
     struct sockaddr_in from;
     fromlen = sizeof(from);
 
     uint8_t *buff = malloc(1500);
-    ssize_t buff_len = 1500;
+    ssize_t  buff_len = 1500;
 
-    tcphdr *hdr;
+    tcphdr  *hdr;
     uint8_t *data;
-    ssize_t data_length;
+    ssize_t  data_length;
 
-
-    for(;;) {
+    for (;;) {
         // Wait for incoming packet and deserialize
         ssize_t packet_length = Recvfrom(buff, buff_len, 0, (struct sockaddr *)&from, &fromlen);
         deserialize_utcp_packet(buff, packet_length, &hdr, &data, &data_length);
@@ -41,75 +40,69 @@ int utcp_input(struct tcb *tcb) {
         struct tcb *tcb = find_tcb(hdr, ntohl(from.sin_addr.s_addr));
         PRINT_TCP_VARS(tcb, "INPUT PRE-PROC");
 
-        if(tcb == NULL) err_sys("UTCP packet came with no active socket");
+        if (tcb == NULL)
+            err_sys("UTCP packet came with no active socket");
 
         switch (tcb->state) {
-            case TCP_LISTEN: // If SYN flag set, accept new conneciton
-                if(hdr->th_flags & TH_SYN) {
-                    printf("Received SYN from %u:%d\n", ntohl(from.sin_addr.s_addr), hdr->th_sport);
+        case TCP_LISTEN: // If SYN flag set, accept new conneciton
+            if (hdr->th_flags & TH_SYN) {
+                printf("Received SYN from %u:%d\n", ntohl(from.sin_addr.s_addr), hdr->th_sport);
 
-                    tcb->dst_port = hdr->th_sport;
-                    tcb->dst_ip = ntohl(from.sin_addr.s_addr);
-                    tcb->dst_udp_port = ntohs(from.sin_port);
-                    tcb->irs = hdr->th_seq;
-                    tcb->rcv_nxt = tcb->irs + 1; // Increase sequence number by one
-                    tcb->snd_wnd = hdr->th_win;
+                tcb->dst_port = hdr->th_sport;
+                tcb->dst_ip = ntohl(from.sin_addr.s_addr);
+                tcb->dst_udp_port = ntohs(from.sin_port);
+                tcb->irs = hdr->th_seq;
+                tcb->rcv_nxt = tcb->irs + 1; // Increase sequence number by one
+                tcb->snd_wnd = hdr->th_win;
 
-                    tcb->iss = 0;
-                    tcb->snd_nxt = tcb->iss;
-                    tcb->snd_una = tcb->iss;
-                    tcb->state = TCP_SYN_RECV;
+                tcb->iss = 0;
+                tcb->snd_nxt = tcb->iss;
+                tcb->snd_una = tcb->iss;
+                tcb->state = TCP_SYN_RECV;
 
-                    utcp_output(tcb);
-                }
-                break;
+                utcp_output(tcb);
+            }
+            break;
 
-            case TCP_SYN_SENT:
-                if ((hdr->th_flags & TH_SYN) && (hdr->th_flags & TH_ACK)) { // SYN-ACK Packet
-                    if (hdr->th_ack == tcb->snd_nxt) {
+        case TCP_SYN_SENT:
+            if ((hdr->th_flags & TH_SYN) && (hdr->th_flags & TH_ACK)) { // SYN-ACK Packet
+                if (hdr->th_ack == tcb->snd_nxt) {
 
-                        tcb->snd_una = hdr->th_ack;
-                        tcb->irs = hdr->th_seq; // Set the server's inital recieve sequence
-                        tcb->rcv_nxt = hdr->th_seq + 1; // We are now ready to recieve the (irs [or SYN bit] + 1 ) byte
-                        tcb->snd_wnd = hdr->th_win;
-                        tcb->state = TCP_ESTABLISHED;
-                        utcp_output(tcb);
-
-                        printf("Connection Established with UTCP server\n");
-                    }
-                }
-                break;
-
-            case TCP_SYN_RECV:
-                if ((hdr->th_flags & TH_ACK) && (hdr->th_ack == tcb->snd_nxt)) { // The final ACK of the 3-way handshake
-                    tcb->state = TCP_ESTABLISHED;
                     tcb->snd_una = hdr->th_ack;
-                    printf("Handshake complete (Server side)\n");
-                    break;
-                }
-            // Fall through to TCP_ESTABLISHED to handle the data in the same segment
-            case TCP_ESTABLISHED:
-                handle_received_data(tcb, hdr, data, data_length);
-                break;
-        }
+                    tcb->irs = hdr->th_seq;         // Set the server's inital recieve sequence
+                    tcb->rcv_nxt = hdr->th_seq + 1; // We are now ready to recieve the (irs [or SYN bit] + 1 ) byte
+                    tcb->snd_wnd = hdr->th_win;
+                    tcb->state = TCP_ESTABLISHED;
+                    utcp_output(tcb);
 
+                    printf("Connection Established with UTCP server\n");
+                }
+            }
+            break;
+
+        case TCP_SYN_RECV:
+            if ((hdr->th_flags & TH_ACK) && (hdr->th_ack == tcb->snd_nxt)) { // The final ACK of the 3-way handshake
+                tcb->state = TCP_ESTABLISHED;
+                tcb->snd_una = hdr->th_ack;
+                printf("Handshake complete (Server side)\n");
+                break;
+            }
+        // Fall through to TCP_ESTABLISHED to handle the data in the same segment
+        case TCP_ESTABLISHED:
+            handle_received_data(tcb, hdr, data, data_length);
+            break;
+        }
     }
     // Unreachable code
     free(buff);
 }
 
-static void handle_received_data(
-    struct tcb *tcb,
-    tcphdr *hdr,
-    uint8_t *data,
-    ssize_t data_length
-) {
+static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ssize_t data_length) {
     /* Handle Acknowledgement */
     uint32_t ack_num = hdr->th_ack;
 
-    if (
-        SEQ_GT(ack_num, tcb->snd_una) && // Ensure packet isn't ACKing bytes that were already ACKed
-        SEQ_LEQ(ack_num, tcb->snd_nxt) // Ensure packet isn't ACKing unsent butes
+    if (SEQ_GT(ack_num, tcb->snd_una) && // Ensure packet isn't ACKing bytes that were already ACKed
+        SEQ_LEQ(ack_num, tcb->snd_nxt)   // Ensure packet isn't ACKing unsent butes
     ) {
         uint32_t newly_acked_bytes = ack_num - tcb->snd_una;
 
@@ -124,7 +117,8 @@ static void handle_received_data(
     }
 
     /* Recieve window: Handle my acknowledgment */
-    if (data_length <= 0) return;
+    if (data_length <= 0)
+        return;
 
     uint32_t seq_num = hdr->th_seq;
 
@@ -162,7 +156,6 @@ static void handle_received_data(
     }
 
     utcp_output(tcb);
-
 }
 
 /**
@@ -175,17 +168,11 @@ static void handle_received_data(
  * In this function, we change the buffer to hold the tcpheader in host format and alter
  * the out_hdr and out_data to point to their respective places in the buffer.
  */
-static void deserialize_utcp_packet(
-    uint8_t *buff,
-    size_t buf_len,
-    tcphdr **out_hdr,
-    uint8_t **out_data,
-    ssize_t *out_data_len
-) {
+static void deserialize_utcp_packet(uint8_t *buff, size_t buf_len, tcphdr **out_hdr, uint8_t **out_data,
+                                    ssize_t *out_data_len) {
 
     if (buf_len < sizeof(tcphdr))
-        err_sys(
-            "Can not parse utcp packet. Are you sure this was sent correctly?");
+        err_sys("Can not parse utcp packet. Are you sure this was sent correctly?");
 
     *out_hdr = (tcphdr *)buff;
 
@@ -206,15 +193,15 @@ static void deserialize_utcp_packet(
  * @brief Find the TCB structure with four tuple or a active listening socket
  *
  */
-static struct tcb* find_tcb(tcphdr *hdr, uint32_t src_ip) {
+static struct tcb *find_tcb(tcphdr *hdr, uint32_t src_ip) {
     struct tcb *listen_match = NULL;
 
-    for(int i = 0; i < MAX_UTCP_SOCKETS; i++) {
+    for (int i = 0; i < MAX_UTCP_SOCKETS; i++) {
         struct tcb *tcb_found = utcp_fd_table[i];
-        if (!tcb_found) continue;
+        if (!tcb_found)
+            continue;
 
-        if (tcb_found->src_port == hdr->th_dport &&
-            tcb_found->dst_port == hdr->th_sport &&
+        if (tcb_found->src_port == hdr->th_dport && tcb_found->dst_port == hdr->th_sport &&
             tcb_found->dst_ip == src_ip) {
             return tcb_found;
         }
@@ -227,13 +214,13 @@ static struct tcb* find_tcb(tcphdr *hdr, uint32_t src_ip) {
     return listen_match;
 }
 
-static ssize_t Recvfrom(void *buf, size_t len, int flags,
-                        struct sockaddr *__restrict src_addr,
+static ssize_t Recvfrom(void *buf, size_t len, int flags, struct sockaddr *__restrict src_addr,
                         socklen_t *__restrict addrlen) {
     ssize_t data = recvfrom(udp_fd, buf, len, flags, src_addr, addrlen);
 
     // Cast data recieved to TCP header
-    if (data < 0) err_sys("UTCP recvfrom failed");
+    if (data < 0)
+        err_sys("UTCP recvfrom failed");
 
     return data;
 }
