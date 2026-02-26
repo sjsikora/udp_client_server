@@ -7,6 +7,7 @@
 #include <string.h>
 #include <utcp/api.h>
 #include <utcp/net/tcp.h>
+#include <utcp/net/timers.h>
 #include <utcp/utcp_init.h>
 #include <utcp/utcp_output.h>
 #include <utcp/utcp_utils.h>
@@ -66,13 +67,19 @@ int utcp_input(struct tcb *tcb) {
 
         case TCP_SYN_SENT:
             if ((hdr->th_flags & TH_SYN) && (hdr->th_flags & TH_ACK)) { // SYN-ACK Packet
-                if (hdr->th_ack == tcb->snd_nxt) {
+                if (hdr->th_ack == tcb->snd_nxt) {                      // If the ack is ready for the next packet
 
-                    tcb->snd_una = hdr->th_ack;
+                    // TCB sender window updates
+                    tcb->snd_una = hdr->th_ack;     // Update new oldest unacked number
                     tcb->irs = hdr->th_seq;         // Set the server's inital recieve sequence
                     tcb->rcv_nxt = hdr->th_seq + 1; // We are now ready to recieve the (irs [or SYN bit] + 1 ) byte
-                    tcb->snd_wnd = hdr->th_win;
+                    tcb->snd_wnd = hdr->th_win;     // The reciever may have a smaller window, update that
                     tcb->state = TCP_ESTABLISHED;
+
+                    // Disarm the retransmission timer
+                    tcb->t_timer[TCPT_REXMT] = 0;
+                    tcb->t_rxtshift = 0;
+
                     utcp_output(tcb);
 
                     printf("Connection Established with UTCP server\n");
@@ -102,7 +109,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
     uint32_t ack_num = hdr->th_ack;
 
     if (SEQ_GT(ack_num, tcb->snd_una) && // Ensure packet isn't ACKing bytes that were already ACKed
-        SEQ_LEQ(ack_num, tcb->snd_nxt)   // Ensure packet isn't ACKing unsent butes
+        SEQ_LEQ(ack_num, tcb->snd_max)   // Ensure packet isn't ACKing unsent butes
     ) {
         uint32_t newly_acked_bytes = ack_num - tcb->snd_una;
 
@@ -112,8 +119,59 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Slide the window over
         tcb->send_buf_head = tcb->send_buf_head + newly_acked_bytes;
         tcb->snd_wnd = hdr->th_win;
-    } else {
-        printf("Duplicate ACK\n");
+
+        // Retransmission timer
+        // If this ACK acknowledges EVERYTHING we have sent, turn off the timer
+        if (tcb->snd_una == tcb->snd_max) {
+            tcb->t_timer[TCPT_REXMT] = 0;
+        } else {
+            // There is still data in flight. Restart the timer for the next segment.
+            tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
+        }
+
+    } else if (ack_num == tcb->snd_una) {
+        /* Potential Duplicate ack packet */
+        if (data_length == 0 &&             // No data was sent in the segment
+            hdr->th_win == tcb->snd_wnd &&  // Send window has not been updated
+            tcb->snd_una != tcb->snd_max) { // There is data in flight
+
+            tcb->t_dupacks++;
+
+            /**
+             * Trip ACK handling
+             */
+            if (tcb->t_dupacks == 3) {
+                printf("[UTCP] Fast Retransmit Triggered for seq %u\n", tcb->snd_una);
+
+                /* Calculate slow start */
+                uint32_t flight_size = tcb->snd_nxt - tcb->snd_una; // Unacknowledged bytes in flight)
+                uint32_t half_flight = flight_size / 2;
+                tcb->ssthresh = (half_flight > (2 * MSS)) ? half_flight : (2 * MSS);
+
+                // 3. Enter Fast Recovery: cwnd = ssthresh + 3 * MSS
+                tcb->cwnd = tcb->ssthresh + (3 * MSS);
+
+                /**
+                 * Fast retransmit. Try to get the single missing packet out before we the retransmission
+                 * timer times out. We do this by temporarly setting the snd_nxt variable back and reverting
+                 * it after we send the segment.
+                 */
+                uint32_t old_snd_nxt = tcb->snd_nxt;
+                tcb->snd_nxt = tcb->snd_una;
+
+                utcp_output(tcb); // Sends exactly one MSS starting at snd_una
+
+                // Restore pointer so we don't resend everything
+                tcb->snd_nxt = old_snd_nxt;
+
+            } else if (tcb->t_dupacks > 3) {
+                // We are already in Fast Recovery. Inflate the window.
+                tcb->cwnd += MSS;
+
+                // RFC 5681 says: "Transmit a segment, if allowed by the new value of cwnd"
+                utcp_output(tcb);
+            }
+        }
     }
 
     /* Recieve window: Handle my acknowledgment */
@@ -121,6 +179,28 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         return;
 
     uint32_t seq_num = hdr->th_seq;
+
+    /**
+     * Case that the sequence number is past our expectation.
+     * This means the packet contains data that we already have correct and
+     * in order, but it also may contain new data! Here, we adjust accordingly
+     */
+    if (SEQ_LT(seq_num, tcb->rcv_nxt)) {
+        uint32_t duplicate_bytes = tcb->rcv_nxt - seq_num;
+
+        // Case packet is full duplicate
+        if (duplicate_bytes >= data_length) {
+            printf("Received fully duplicate data. Re-acking.\n");
+            utcp_output(tcb);
+            return;
+        }
+
+        // Case some bytes are new some are old. Trim the data down.
+        printf("Partially overlapping data. Trimming first %u bytes.\n", duplicate_bytes);
+        seq_num += duplicate_bytes;
+        data += duplicate_bytes;
+        data_length -= duplicate_bytes;
+    }
 
     if (seq_num == tcb->rcv_nxt) { // Is this the packet we are expecting?
 
@@ -140,13 +220,6 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             printf("Receive buffer full, dropping data.\n");
             return;
         }
-    } else if (SEQ_LT(seq_num, tcb->rcv_nxt)) {
-        /**
-         * Retransmission of old data. We already have this data in our
-         * recieve buffer all correct. The system just hasn't recieved our
-         * ACK for the data.
-         */
-        printf("Received duplicate data (retransmission). Re-acking.\n");
     } else {
         /**
          * Out-of-order data. Simply just drop this packet

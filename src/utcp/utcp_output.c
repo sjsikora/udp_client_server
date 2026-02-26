@@ -3,6 +3,7 @@
 #include <string.h>
 #include <utcp/config.h>
 #include <utcp/net/tcp.h>
+#include <utcp/net/timers.h>
 #include <utcp/utcp_init.h>
 #include <utcp/utcp_output.h>
 #include <utcp/utcp_utils.h>
@@ -91,6 +92,11 @@ int utcp_output(struct tcb *tcb) {
 
         if (tcb->snd_nxt > tcb->snd_max)
             tcb->snd_max = tcb->snd_nxt;
+
+        // If the retransmission timer is not already running, start it
+        if (tcb->t_timer[TCPT_REXMT] == 0) {
+            tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
+        }
     }
 
     PRINT_TCP_VARS(tcb, "OUTPUT POST-SEND");
