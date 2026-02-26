@@ -1,9 +1,24 @@
 #include "utcp/net/tcp.h"
 #include "utcp/net/timers.h"
 #include "utcp/utcp_init.h"
+#include "utcp/utcp_output.h"
 #include "utils.h"
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
+
+static uint64_t get_current_time_ms(void) {
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        err_sys("Can not get current time");
+    }
+
+    // Convert seconds to ms, and nanoseconds to ms, then combine
+    uint64_t time_ms = (uint64_t)(ts.tv_sec * 1000) + (uint64_t)(ts.tv_nsec / 1000000);
+
+    return time_ms;
+}
 
 void utcp_timers(struct tcb *tcb, int timer) {
     switch (timer) {

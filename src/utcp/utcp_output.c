@@ -64,10 +64,6 @@ int utcp_output(struct tcb *tcb) {
         }
     }
 
-    if (data_length == 0 && !force_send && !(flags & (TH_SYN | TH_FIN | TH_RST))) {
-        return 0;
-    }
-
     // Create the segment
     size_t              segment_size = sizeof(tcphdr) + data_length;
     struct tcp_segment *seg = malloc(segment_size);

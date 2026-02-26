@@ -28,6 +28,6 @@
 #define TCPTV_KEEPCNT   8   /* max probes before drop */
 
 // Exponential backoff multipliers for RTO and Persist timers
-const int tcp_backoff[TCP_MAXRXTSHIFT + 1] = {1, 2, 4, 8, 16, 32, 64, 64, 64, 64, 64, 64, 64};
+extern const int tcp_backoff[];
 
 #endif
