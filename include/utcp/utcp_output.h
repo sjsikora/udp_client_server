@@ -36,9 +36,14 @@ extern uint8_t tcp_outflags[];
  * We handle this undefined packet send by calling this function on events. For example, we
  * may have a situation where the reciever's buffer is full. When the application wants to send,
  * we see that the receiver couldn't handle it, and we don't send a packet. Later, it is up to the
- * reciever to send up a packet with their new window. On that event, utcp_listen will call tcp_ouput
+ * reciever to send up a packet with their new window. On that event, utcp_list`en will call tcp_ouput
  * to then process that send buffer.
  *
+ * The exception to the above rule being if the t_flags attribute in the tcb is set to TF_ACKNOW.
+ * In this case, we force an ACK out.
+ *
+ * @note IMPORTANT. utcp_output assumes that the calling thread has a lock on the calling tcb. If not,
+ * then race conditions can arise.
  */
 int utcp_output(struct tcb *);
 

@@ -39,6 +39,9 @@ int utcp_input(struct tcb *tcb) {
 
         // Find coorsponding TCB
         struct tcb *tcb = find_tcb(hdr, ntohl(from.sin_addr.s_addr));
+
+        pthread_mutex_lock(&tcb->lock);
+
         PRINT_TCP_VARS(tcb, "INPUT PRE-PROC");
 
         if (tcb == NULL)
@@ -99,6 +102,8 @@ int utcp_input(struct tcb *tcb) {
             handle_received_data(tcb, hdr, data, data_length);
             break;
         }
+
+        pthread_mutex_unlock(&tcb->lock);
     }
     // Unreachable code
     free(buff);
@@ -167,9 +172,6 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             } else if (tcb->t_dupacks > 3) {
                 // We are already in Fast Recovery. Inflate the window.
                 tcb->cwnd += MSS;
-
-                // RFC 5681 says: "Transmit a segment, if allowed by the new value of cwnd"
-                utcp_output(tcb);
             }
         }
     }

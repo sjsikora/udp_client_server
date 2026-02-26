@@ -9,6 +9,7 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp_var.h>
+#include <pthread.h>
 #include <stdint.h>
 
 struct tcp_connection_id {
@@ -149,6 +150,10 @@ struct tcb {
     uint8_t  recv_buf[RECV_BUF_SIZE];
     uint32_t recv_buf_head; // next byte to read
     uint32_t recv_buf_tail; // last received byte
+
+    /* Mutex locks */
+    pthread_mutex_t lock;     // Protects this specific TCB
+    pthread_cond_t  cond_var; // Used to wake up blocking API calls (read/accept/connect)
 };
 
 #endif

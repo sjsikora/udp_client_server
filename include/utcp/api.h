@@ -84,7 +84,7 @@ int utcp_accept(int fd);
  * Writes the data in the buffer to the send buffer. Then, calls a request to
  * send the segment out.
  */
-int utcp_send(int fd, const void *buf, size_t len);
+void utcp_send(int fd, const void *buf, size_t len);
 
 /**
  * @brief Read data from the sender

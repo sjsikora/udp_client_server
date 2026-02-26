@@ -32,6 +32,7 @@ static void wait_until_established(struct tcb *tcb) {
  * for the fd
  */
 static struct tcb *utcp_get_tcb(int fd) {
+
     if (fd < 0 || fd >= MAX_UTCP_SOCKETS)
         err_sys("Invalid UTCP fd");
 
@@ -58,6 +59,8 @@ static struct tcb *utcp_get_tcb_in_state(int fd, enum tcp_state required) {
 int utcp_socket(void) {
     utcp_package_init(1970);
 
+    pthread_mutex_lock(&utcp_table_lock);
+
     // Loop the table for utcp file descriptors and find a available one
     int utcp_fd;
     for (utcp_fd = 0; utcp_fd < MAX_UTCP_SOCKETS; utcp_fd++) {
@@ -75,17 +78,25 @@ int utcp_socket(void) {
 
     tcb->state = TCP_CLOSED;
 
+    // Init locks
+    pthread_mutex_init(&tcb->lock, NULL);
+    pthread_cond_init(&tcb->cond_var, NULL);
+
     // Init acknowledgment numbers
     tcb->iss = 0;
     tcb->snd_una = tcb->iss;
     tcb->snd_nxt = tcb->iss;
 
     utcp_fd_table[utcp_fd] = tcb;
+    pthread_mutex_unlock(&utcp_table_lock);
+
     return utcp_fd;
 }
 
-int utcp_send(int fd, const void *buf, size_t len) {
+void utcp_send(int fd, const void *buf, size_t len) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
+
+    pthread_mutex_lock(&tcb->lock);
 
     // Check if there is room in buffer. Very very limited right now.
     uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head;
@@ -101,7 +112,11 @@ int utcp_send(int fd, const void *buf, size_t len) {
     tcb->send_buf_tail += len;
 
     // Try to send the data
-    return utcp_output(tcb);
+    utcp_output(tcb);
+
+    pthread_mutex_unlock(&tcb->lock);
+
+    return;
 }
 
 int utcp_read(int fd, uint8_t *buf, size_t len) {
@@ -114,6 +129,8 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
         }
         usleep(1000000);
     }
+
+    pthread_mutex_lock(&tcb->lock);
 
     // Look inside the read buffer, read up to passed in buffer length,
     // or read all the data avaiable in the buffer
@@ -140,6 +157,8 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
         tcb->t_flags |= TF_ACKNOW;
         utcp_output(tcb);
     }
+
+    pthread_mutex_unlock(&tcb->lock);
 
     return avaiable_bytes_to_read;
 }
@@ -192,6 +211,8 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     struct tcb               *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
+    pthread_mutex_lock(&tcb->lock);
+
     if (sin->sin_family != AF_INET)
         err_sys("Only AF_INET supported for UTCP connect");
 
@@ -201,6 +222,8 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
     tcb->state = TCP_SYN_SENT;
     utcp_output(tcb);
+
+    pthread_mutex_unlock(&tcb->lock);
 
     wait_until_established(tcb);
 }

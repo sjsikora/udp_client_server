@@ -13,10 +13,11 @@
 
 static void start_listening();
 
-int         UDP_PORT = -1; // Host order global UDP port
-static int  utcp_initialized = 0;
-int         udp_fd = -1;
-struct tcb *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
+int             UDP_PORT = -1; // Host order global UDP port
+static int      utcp_initialized = 0;
+int             udp_fd = -1;
+struct tcb     *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
+pthread_mutex_t utcp_table_lock;
 
 void utcp_package_init(int global_udp_port) {
     if (utcp_initialized)
@@ -46,6 +47,9 @@ void utcp_package_init(int global_udp_port) {
 
     UDP_PORT = ntohs(bound_addr.sin_port);
     printf("[UTCP] UTCP package is initlized and is listening on port %u\n", UDP_PORT);
+
+    // Init global utcp_fd lock
+    pthread_mutex_init(&utcp_table_lock, NULL);
 
     start_listening();
 

@@ -16,6 +16,10 @@ uint8_t tcp_outflags[] = {
     TH_FIN | TH_ACK, TH_ACK, TH_ACK,
 };
 
+/**
+ * SO SO SO CRITICAL I AM WRITING IT TWICE
+ * utcp_output assumes that the calling thread has a lock the tcb.
+ */
 int utcp_output(struct tcb *tcb) {
 
     uint8_t flags = tcp_outflags[tcb->state];

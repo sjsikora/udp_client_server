@@ -77,10 +77,19 @@ void *utcp_slowtimo_thread(void *arg) {
     uint64_t next_tick_time = get_current_time_ms() + TCP_SLOW_TICK_MS;
 
     while (1) {
+        pthread_mutex_lock(&utcp_table_lock);
+
         for (int i = 0; i < MAX_UTCP_SOCKETS; i++) {
             struct tcb *tcb = utcp_fd_table[i];
-            if (!tcb || tcb->state == TCP_CLOSED)
+            if (!tcb)
                 continue;
+
+            pthread_mutex_lock(&tcb->lock);
+
+            if (tcb->state == TCP_CLOSED) {
+                pthread_mutex_unlock(&tcb->lock);
+                continue;
+            }
 
             // Increase the ticks since last segment was recevied.
             tcb->t_idle++;
@@ -101,7 +110,11 @@ void *utcp_slowtimo_thread(void *arg) {
                     }
                 }
             }
+
+            pthread_mutex_unlock(&tcb->lock);
         }
+
+        pthread_mutex_unlock(&utcp_table_lock);
 
         /**
          * Now, we are done with our work, but it has taken us n ms to do this

@@ -6,12 +6,14 @@
 #ifndef UTCP_GLOBALS_H
 #define UTCP_GLOBALS_H
 
+#include <pthread.h>
 #include <utcp/config.h>
 #include <utcp/net/tcp.h>
 
-extern struct tcb *utcp_fd_table[MAX_UTCP_SOCKETS];
-extern int         udp_fd;
-extern int         UDP_PORT; // Host order for the global UDP port
+extern pthread_mutex_t utcp_table_lock; //
+extern struct tcb     *utcp_fd_table[MAX_UTCP_SOCKETS];
+extern int             udp_fd;
+extern int             UDP_PORT; // Host order for the global UDP port
 
 void utcp_package_init(int global_udp_port);
 
