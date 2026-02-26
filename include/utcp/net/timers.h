@@ -30,4 +30,9 @@
 // Exponential backoff multipliers for RTO and Persist timers
 extern const int tcp_backoff[];
 
+/**
+ * @brief Slow timer thread
+ */
+void *utcp_slowtimo_thread(void *arg);
+
 #endif

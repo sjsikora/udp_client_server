@@ -1,14 +1,15 @@
+#include "utcp/api.h"
+#include "utcp/config.h"
+#include "utcp/net/tcp.h"
+#include "utcp/net/timers.h"
+#include "utcp/utcp_input.h"
+#include "utcp/utcp_utils.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <utcp/api.h>
-#include <utcp/config.h>
-#include <utcp/net/tcp.h>
-#include <utcp/utcp_input.h>
-#include <utcp/utcp_utils.h>
 #include <utils.h>
 
 static void start_listening();
@@ -67,4 +68,12 @@ static void start_listening() {
     }
     // Detach so we don't have to join it later
     pthread_detach(input_thread);
+}
+
+static void start_ticking() {
+    pthread_t ticking_thread;
+
+    if (pthread_create(&ticking_thread, NULL, (void *(*)(void *))utcp_slowtimo_thread, NULL) != 0) {
+        err_sys("Failed to create utcp_slowtimo thread");
+    }
 }
