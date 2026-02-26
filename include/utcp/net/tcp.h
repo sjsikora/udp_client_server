@@ -62,6 +62,17 @@ enum tcp_state {
 #define RECV_BUF_SIZE 65535
 
 /**
+ * These are the timer indexes. These four timers implement six out of seven
+ * of the timers that TCP needs to track. The odd out out being the delayed ACK
+ * timer. Some of these are unused currently, but for completeness, they are
+ * included.
+ */
+#define TCPT_REXMT   0 // Retransmission
+#define TCPT_PERSIST 1 // Persist (Zero Window)
+#define TCPT_KEEP    2 // Keepalive / Connection Establishment
+#define TCPT_2MSL    3 // 2MSL / FIN_WAIT_2
+
+/**
  * @brief Transmission Control Block (TCB)
  *
  * The Transmission Control Block (TCB) is a collection of variables for
@@ -107,6 +118,14 @@ struct tcb {
     // Each entry in the t_timer array is the number of 500-ms clock
     // ticks until the timer expires.
     short t_timer[4]; /* The four timer counters */
+
+    uint32_t t_idle; /* The number of 500ms ticks since the last segment was received on this connection*/
+
+    /* RTT Calculation */
+    uint32_t t_rtt;   /* When a specific segment is timed, this is the ticks until that segment is acknowledged */
+    uint32_t t_rtseq; /* The starting sequence number of the segment being tracked */
+
+    uint8_t t_rxtshift; /* The number of retransmission timers that have exprired*/
 
     /* Send buffer */
     uint8_t  send_buf[SEND_BUF_SIZE];
