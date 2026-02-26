@@ -19,6 +19,14 @@ uint8_t tcp_outflags[] = {
 int utcp_output(struct tcb *tcb) {
 
     uint8_t flags = tcp_outflags[tcb->state];
+    bool    force_send = false; // Do we need to force send an ACK?
+
+    if (tcb->t_flags & TF_ACKNOW) {
+        force_send = true;
+
+        // Clear flag
+        tcb->t_flags &= ~TF_ACKNOW;
+    }
 
     size_t data_length = 0;
 
@@ -47,13 +55,17 @@ int utcp_output(struct tcb *tcb) {
 
             data_length = (buffered_data < can_send) ? buffered_data : can_send;
 
-            // 4. Clamp to MSS (Maximum Segment Size)
+            // Clamp to MSS (Maximum Segment Size)
             if (data_length > MSS)
                 data_length = MSS;
 
         } else {
             printf("[DEBUG] Window Full: Win=%u | InFlight=%u\n", receivers_window, unacked_data_in_flight);
         }
+    }
+
+    if (data_length == 0 && !force_send && !(flags & (TH_SYN | TH_FIN | TH_RST))) {
+        return 0;
     }
 
     // Create the segment

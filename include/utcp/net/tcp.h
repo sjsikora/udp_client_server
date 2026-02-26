@@ -109,9 +109,19 @@ struct tcb {
     u_int32_t rcv_wnd; /* recieve window */
     u_int32_t snd_wnd; /* send window*/
 
+    /* Internal TCB Control Flags. Won't use all these flags, but here for compeleteness from the textbook I am using */
+    u_short t_flags;
+
+#define TF_ACKNOW  0x00001 /* send ACK immediately */
+#define TF_DELACK  0x00002 /* send ACK, but try to delay it */
+#define TF_NODELAY 0x00004 /* Don't delay packets to coalesce (Disable Nagle) */
+#define TF_NOOPT   0x00008 /* Don't use TCP options */
+#define TF_SENTFIN 0x00010 /* We have sent a FIN */
+
     /* Congestion control */
     uint32_t cwnd;
     uint32_t ssthresh;
+    uint8_t  t_dupacks; /* Number of consecutive duplicate ACKs */
 
     /* Timers */
 
@@ -122,8 +132,11 @@ struct tcb {
     uint32_t t_idle; /* The number of 500ms ticks since the last segment was received on this connection*/
 
     /* RTT Calculation */
-    uint32_t t_rtt;   /* When a specific segment is timed, this is the ticks until that segment is acknowledged */
-    uint32_t t_rtseq; /* The starting sequence number of the segment being tracked */
+    uint32_t t_rtt;    /* When a specific segment is timed, this is the ticks until that segment is acknowledged */
+    uint32_t t_rtseq;  /* The starting sequence number of the segment being tracked */
+    uint32_t t_srtt;   /* The average of the measured round-trip times */
+    uint32_t t_rttvar; /* The variance in RTT samples */
+    uint32_t t_rxtcur; /* The final calculated timeout value currently */
 
     uint8_t t_rxtshift; /* The number of retransmission timers that have exprired*/
 

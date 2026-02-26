@@ -137,7 +137,7 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     // So, we add this condition to ensure we only send an window update if it is significant
     // that being if the rcv_wnd is one MSS long or we were previously at 0 rcv_wnd.
     if (tcb->rcv_wnd >= MSS || (tcb->rcv_wnd < MSS && avaiable_bytes_to_read == RECV_BUF_SIZE)) {
-        // Trigger a window update packet to the sender
+        tcb->t_flags |= TF_ACKNOW;
         utcp_output(tcb);
     }
 

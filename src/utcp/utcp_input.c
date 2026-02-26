@@ -191,6 +191,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Case packet is full duplicate
         if (duplicate_bytes >= data_length) {
             printf("Received fully duplicate data. Re-acking.\n");
+            tcb->t_flags |= TF_ACKNOW;
             utcp_output(tcb);
             return;
         }
@@ -221,11 +222,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             return;
         }
     } else {
-        /**
-         * Out-of-order data. Simply just drop this packet
-         */
         printf("Received out-of-order packet. Expected %u, got %u\n", tcb->rcv_nxt, seq_num);
-        return;
+        tcb->t_flags |= TF_ACKNOW;
     }
 
     utcp_output(tcb);
