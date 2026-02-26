@@ -94,6 +94,11 @@ int utcp_input(struct tcb *tcb) {
             if ((hdr->th_flags & TH_ACK) && (hdr->th_ack == tcb->snd_nxt)) { // The final ACK of the 3-way handshake
                 tcb->state = TCP_ESTABLISHED;
                 tcb->snd_una = hdr->th_ack;
+
+                // Disarm the retransmission timer
+                tcb->t_timer[TCPT_REXMT] = 0;
+                tcb->t_rxtshift = 0;
+
                 printf("Handshake complete (Server side)\n");
                 break;
             }

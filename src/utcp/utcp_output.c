@@ -9,7 +9,7 @@
 #include <utcp/utcp_utils.h>
 #include <utils.h>
 
-static int pass_to_udp(struct tcp_segment *, size_t, uint32_t, uint16_t);
+static int pass_to_udp(struct tcp_segment *, size_t, uint32_t, uint16_t, bool);
 
 uint8_t tcp_outflags[] = {
     TH_RST | TH_ACK, 0,      TH_SYN, TH_SYN | TH_ACK, TH_ACK, TH_ACK, TH_FIN | TH_ACK, TH_FIN | TH_ACK,
@@ -95,7 +95,7 @@ int utcp_output(struct tcb *tcb) {
     }
 
     debug_print_tcp_packet(&seg->hdr, true, seg->data, data_length);
-    int bytes_sent = pass_to_udp(seg, segment_size, tcb->dst_ip, tcb->dst_udp_port);
+    int bytes_sent = pass_to_udp(seg, segment_size, tcb->dst_ip, tcb->dst_udp_port, (tcb->state == TCP_ESTABLISHED));
 
     // Update TCB counters
     if (data_length > 0 || (flags & (TH_SYN | TH_FIN))) {
@@ -123,7 +123,8 @@ int utcp_output(struct tcb *tcb) {
  * Used as our mock IP layer.
  *
  */
-static int pass_to_udp(struct tcp_segment *seg, size_t segment_size, uint32_t dst_ip, uint16_t dst_upd_port) {
+static int pass_to_udp(struct tcp_segment *seg, size_t segment_size, uint32_t dst_ip, uint16_t dst_upd_port,
+                       bool packet_risk_drop) {
 
     // NOTE: Possible optimization to cache this data.
     struct sockaddr_in dst_addr;
@@ -131,6 +132,18 @@ static int pass_to_udp(struct tcp_segment *seg, size_t segment_size, uint32_t ds
     dst_addr.sin_family = AF_INET;
     dst_addr.sin_port = htons(dst_upd_port);
     dst_addr.sin_addr.s_addr = htonl(dst_ip);
+
+    /**
+     * Because we are commuicating over reliable localhost, we mock a unreliable
+     * network by rolling a random chance that the packet is dropped over the network.
+     */
+    if (packet_risk_drop) {
+        printf("[UTCP] Outgoing packet dropped!\n");
+        int result = rand_r(&random_seed);
+        if ((result % 100) < 10) { // 10% chance
+            return segment_size;
+        }
+    }
 
     ssize_t sent_bytes = sendto(udp_fd, seg, segment_size, 0, (struct sockaddr *)&dst_addr, sizeof(dst_addr));
 

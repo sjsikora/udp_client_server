@@ -13,7 +13,8 @@
 extern pthread_mutex_t utcp_table_lock; //
 extern struct tcb     *utcp_fd_table[MAX_UTCP_SOCKETS];
 extern int             udp_fd;
-extern int             UDP_PORT; // Host order for the global UDP port
+extern int             UDP_PORT;    // Host order for the global UDP port
+extern unsigned int    random_seed; // Random seed for reproduceability
 
 void utcp_package_init(int global_udp_port);
 

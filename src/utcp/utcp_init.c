@@ -13,12 +13,14 @@
 #include <utils.h>
 
 static void start_listening();
+static void start_ticking();
 
 int             UDP_PORT = -1; // Host order global UDP port
 static int      utcp_initialized = 0;
 int             udp_fd = -1;
 struct tcb     *utcp_fd_table[MAX_UTCP_SOCKETS] = {0};
 pthread_mutex_t utcp_table_lock;
+unsigned int    random_seed = 67;
 
 void utcp_package_init(int global_udp_port) {
     if (utcp_initialized)
@@ -53,6 +55,7 @@ void utcp_package_init(int global_udp_port) {
     pthread_mutex_init(&utcp_table_lock, NULL);
 
     start_listening();
+    start_ticking();
 
     utcp_initialized = 1;
 }
