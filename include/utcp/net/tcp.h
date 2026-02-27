@@ -12,6 +12,8 @@
 #include <pthread.h>
 #include <stdint.h>
 
+struct tcb;
+
 struct tcp_connection_id {
     uint32_t src_ip;
     uint16_t src_port;
@@ -74,6 +76,66 @@ enum tcp_state {
 #define TCPT_2MSL    3 // 2MSL / FIN_WAIT_2
 
 /**
+ * An enum defining what congestion control state we are in.
+ */
+enum tcp_ca_state {
+    TCP_CA_OPEN = 0, // Normal state, slow start or congestion avoidance
+    TCP_CA_DISORDER, // Duplicate ACKs received, but not yet 3
+    TCP_CA_CWR,      // Congestion Window Reduced (ECN)
+    TCP_CA_RECOVERY, // Fast Retransmit / Fast Recovery (3+ dupacks)
+    TCP_CA_LOSS      // Retransmission Timeout (RTO) occurred
+};
+
+/**
+ * This enum describes the events that can be called to the CC cong_control function.
+ */
+enum tcp_cc_event {
+    TCP_CC_EVENT_INIT = 0, // Connection just established
+    TCP_CC_EVENT_ACK,      // Normal cumulative ACK for new data
+    TCP_CC_EVENT_DUP_ACK,  // Duplicate ACK received (potential loss/reordering)
+    TCP_CC_EVENT_TIMEOUT,  // Retransmission timer expired (severe loss)
+};
+
+struct cc_event_args {
+    enum tcp_cc_event type;
+
+    // The union holds different data depending on the event type
+    union {
+        // Data specifically for TCP_CC_EVENT_ACK
+        struct {
+            uint32_t acked_bytes;
+            uint32_t rtt_us; // Your LSTM will definitely want this!
+        } ack;
+
+        // TCP_CC_EVENT_DUP_ACK
+        struct {
+            uint32_t total_dups; // E.g., is this the 1st or the 4th dup ACK?
+        } dup;
+
+        // Data specifically for TCP_CC_EVENT_TIMEOUT
+        struct {
+            uint32_t flight_size; // How much data was lost
+        } timeout;
+    } data;
+};
+
+/**
+ * @brief A Congestion Control interface.
+ */
+struct tcp_congestion_ops {
+    const char name[50];
+
+    /**
+     * The duties of congestion control are compelety handled by this master function.
+     * The UTCP infrastructure will call this function with an event, and it's respective
+     * args as defined in cc_event_args. For example, on a new ack, we pass in the number
+     * of newly acked bytes. It is then up to the CC algrothium to turn follow the RFC and
+     * control the ssthresh and cwnd.
+     */
+    void (*cong_control)(struct tcb *tcb, const struct cc_event_args *args);
+};
+
+/**
  * @brief Transmission Control Block (TCB)
  *
  * The Transmission Control Block (TCB) is a collection of variables for
@@ -123,6 +185,9 @@ struct tcb {
     uint32_t cwnd;
     uint32_t ssthresh;
     uint8_t  t_dupacks; /* Number of consecutive duplicate ACKs */
+
+    enum tcp_ca_state                ca_state; // Congestion state
+    const struct tcp_congestion_ops *ca_ops;   // Pointer to the active CC algorithm
 
     /* Timers */
 
