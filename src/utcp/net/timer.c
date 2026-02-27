@@ -45,9 +45,16 @@ void utcp_timers(struct tcb *tcb, int timer) {
             new_timer = 128;
         tcb->t_timer[TCPT_REXMT] = new_timer;
 
+        struct cc_event_args args;
+        args.type = TCP_CC_EVENT_TIMEOUT;
+        args.data.timeout.flight_size = tcb->snd_nxt - tcb->snd_una;
+
         // Rollback the sequence pointers
         tcb->snd_nxt = tcb->snd_una;
         printf("[UTCP] RTO Expired! Retransmitting sequence %u\n", tcb->snd_nxt);
+
+        // Pass dup ACK to the respective cong_control
+        tcb->cc_ops->cong_control(tcb, &args);
 
         // Force retransmission
         utcp_output(tcb);

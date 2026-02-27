@@ -187,7 +187,7 @@ struct tcb {
     uint8_t  t_dupacks; /* Number of consecutive duplicate ACKs */
 
     enum tcp_ca_state                ca_state; // Congestion state
-    const struct tcp_congestion_ops *ca_ops;   // Pointer to the active CC algorithm
+    const struct tcp_congestion_ops *cc_ops;   // Pointer to the active CC algorithm
 
     /* Timers */
 

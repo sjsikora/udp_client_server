@@ -139,6 +139,12 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
         }
 
+        struct cc_event_args args;
+        args.type = TCP_CC_EVENT_ACK;
+        args.data.ack.acked_bytes = newly_acked_bytes;
+
+        tcb->cc_ops->cong_control(tcb, &args);
+
     } else if (ack_num == tcb->snd_una) {
         /* Potential Duplicate ack packet */
         if (data_length == 0 &&             // No data was sent in the segment
@@ -146,38 +152,14 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             tcb->snd_una != tcb->snd_max) { // There is data in flight
 
             tcb->t_dupacks++;
+            printf("[UTCP] Dup ack detected %u\n", tcb->snd_una);
 
-            /**
-             * Trip ACK handling
-             */
-            if (tcb->t_dupacks == 3) {
-                printf("[UTCP] Fast Retransmit Triggered for seq %u\n", tcb->snd_una);
+            struct cc_event_args args;
+            args.type = TCP_CC_EVENT_DUP_ACK;
+            args.data.dup.total_dups = tcb->t_dupacks;
 
-                /* Calculate slow start */
-                uint32_t flight_size = tcb->snd_nxt - tcb->snd_una; // Unacknowledged bytes in flight)
-                uint32_t half_flight = flight_size / 2;
-                tcb->ssthresh = (half_flight > (2 * MSS)) ? half_flight : (2 * MSS);
-
-                // 3. Enter Fast Recovery: cwnd = ssthresh + 3 * MSS
-                tcb->cwnd = tcb->ssthresh + (3 * MSS);
-
-                /**
-                 * Fast retransmit. Try to get the single missing packet out before we the retransmission
-                 * timer times out. We do this by temporarly setting the snd_nxt variable back and reverting
-                 * it after we send the segment.
-                 */
-                uint32_t old_snd_nxt = tcb->snd_nxt;
-                tcb->snd_nxt = tcb->snd_una;
-
-                utcp_output(tcb); // Sends exactly one MSS starting at snd_una
-
-                // Restore pointer so we don't resend everything
-                tcb->snd_nxt = old_snd_nxt;
-
-            } else if (tcb->t_dupacks > 3) {
-                // We are already in Fast Recovery. Inflate the window.
-                tcb->cwnd += MSS;
-            }
+            // Pass dup ACK to the respective cong_control
+            tcb->cc_ops->cong_control(tcb, &args);
         }
     }
 
