@@ -62,6 +62,8 @@ static void tahoe_cong_control(struct tcb *tcb, const struct cc_event_args *args
         if (args->data.dup.total_dups == 3) {
             uint32_t flight_size = tcb->snd_nxt - tcb->snd_una;
             cc_shared_timeout(tcb, flight_size);
+
+            utcp_retransmit_segment(tcb, tcb->snd_una);
         }
         // Tahoe ignores dup ACKs > 3
         break;
@@ -102,23 +104,16 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
             tcb->cwnd = tcb->ssthresh + (3 * MSS);
             tcb->ca_state = TCP_CA_RECOVERY;
 
-            /**
-             * Fast retransmit. Try to get the single missing packet out before we the retransmission
-             * timer times out. We do this by temporarly setting the snd_nxt variable back and reverting
-             * it after we send the segment.
-             */
-            uint32_t old_snd_nxt = tcb->snd_nxt;
-            tcb->snd_nxt = tcb->snd_una;
-
-            utcp_output(tcb); // Sends exactly one MSS starting at snd_una
-
-            // Restore pointer so we don't resend everything
-            tcb->snd_nxt = old_snd_nxt;
+            // Try to retransmit that missing segment
+            utcp_retransmit_segment(tcb, tcb->snd_una);
 
         } else if (args->data.dup.total_dups > 3 && tcb->ca_state == TCP_CA_RECOVERY) {
-            // Artificially inflate window by 1 MSS for each subsequent dup ACK
             tcb->cwnd += MSS;
+
+            // While in fast recovery, try to transmit more data
+            utcp_output(tcb);
         }
+        break;
         break;
 
     case TCP_CC_EVENT_TIMEOUT:

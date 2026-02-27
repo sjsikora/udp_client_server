@@ -47,4 +47,12 @@ extern uint8_t tcp_outflags[];
  */
 int utcp_output(struct tcb *);
 
+/**
+ * @brief Send exactly one segment of MSS size at passed sequence number
+ *
+ * Used during fast retransmit. We often want to send the missing packet out to try to beat
+ * the retransmission timer.
+ */
+int utcp_retransmit_segment(struct tcb *tcb, uint32_t seq);
+
 #endif
