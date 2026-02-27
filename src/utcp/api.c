@@ -1,3 +1,4 @@
+#include "utcp/cc/reno_tahoe.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -81,6 +82,8 @@ int utcp_socket(void) {
     // Init locks
     pthread_mutex_init(&tcb->lock, NULL);
     pthread_cond_init(&tcb->cond_var, NULL);
+
+    tcb->cc_ops = &utcp_tahoe;
 
     // Init acknowledgment numbers
     tcb->iss = 0;
