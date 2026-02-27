@@ -176,9 +176,9 @@ static int pass_to_udp(struct tcp_segment *seg, size_t segment_size, uint32_t ds
      * network by rolling a random chance that the packet is dropped over the network.
      */
     if (packet_risk_drop) {
-        printf("[UTCP] Outgoing packet dropped!\n");
         int result = rand_r(&random_seed);
         if ((result % 100) < 10) { // 10% chance
+            printf("[UTCP] Outgoing packet dropped!\n");
             return segment_size;
         }
     }
