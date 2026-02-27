@@ -47,76 +47,125 @@ int utcp_retransmit_segment(struct tcb *tcb, uint32_t seq) {
 
 /**
  * SO SO SO CRITICAL I AM WRITING IT TWICE
- * utcp_output assumes that the calling thread has a lock the tcb.
+ * utcp_output assumes that the calling thread has a lock on the tcb.
  */
 int utcp_output(struct tcb *tcb) {
-
     uint8_t flags = tcp_outflags[tcb->state];
-    bool    force_send = false; // Do we need to force send an ACK?
+    bool    force_send = false;
 
+    // Check if we have been ordered to force an ACK out
     if (tcb->t_flags & TF_ACKNOW) {
         force_send = true;
-
-        // Clear flag
-        tcb->t_flags &= ~TF_ACKNOW;
+        tcb->t_flags &= ~TF_ACKNOW; // Clear the flag immediately
     }
 
-    size_t data_length = 0;
+    int total_bytes_sent = 0;
+    int segments_sent = 0;
 
-    if (tcb->state == TCP_ESTABLISHED) {
-        uint32_t receivers_window = tcb->snd_wnd;
-        uint32_t unacked_data_in_flight = tcb->snd_nxt - tcb->snd_una;
+    /**
+     * We want to keep spinning and sending packets until either the reciever window is full
+     * or our cwnd is full. Further development many be done on this loop to control how much
+     * data is sent at a time.
+     */
+    while (1) {
+        size_t data_length = 0;
+
+        if (tcb->state == TCP_ESTABLISHED) {
+
+            /**
+             * Calcluate how much data we are allowed to send to the reciever right now by
+             * respecting both the recievers window and the cwnd.
+             */
+            uint32_t send_window = (tcb->snd_wnd < tcb->cwnd) ? tcb->snd_wnd : tcb->cwnd;
+            uint32_t unacked_data_in_flight = tcb->snd_nxt - tcb->snd_una;
+
+            /**
+             * This calcuates how many bytes we have sent on the wire throughtout our entire session.
+             * It only includes payload, not the SYN bit (hence the - 1). We default to zero if we have
+             * only sent the SYN bit
+             */
+            uint32_t data_bytes_sent = (tcb->snd_nxt > tcb->iss) ? (tcb->snd_nxt - tcb->iss - 1) : 0;
+
+            /**
+             * Buffered data holds the number of bytes that the user has placed in our buffer that is
+             * waiting to be sent.
+             */
+            uint32_t buffered_data = 0;
+            if (tcb->send_buf_tail > data_bytes_sent) {
+                buffered_data = tcb->send_buf_tail - data_bytes_sent;
+            }
+
+            // Determine how much data we can pack into this specific segment
+            if (send_window > unacked_data_in_flight) {
+                uint32_t can_send = send_window - unacked_data_in_flight;
+                data_length = (buffered_data < can_send) ? buffered_data : can_send;
+
+                // Clamp to MSS (Maximum Segment Size)
+                if (data_length > MSS) {
+                    data_length = MSS;
+                }
+            } else {
+                // Window is completely full; we cannot send any more data.
+                data_length = 0;
+                printf("[DEBUG] Window Full: Win=%u | InFlight=%u\n", tcb->snd_wnd, unacked_data_in_flight);
+            }
+        }
+
+        // 2. Control Packet Safeguard
+        // We only want to consume sequence space for a SYN or FIN once.
+        bool is_syn_fin = (flags & (TH_SYN | TH_FIN)) != 0;
+        bool sending_new_syn_fin = is_syn_fin && (tcb->snd_nxt == tcb->snd_max);
 
         /**
-         * This calcuates how many bytes we have sent on the wire throughtout our entire session.
-         * It only includes payload, not the SYN bit (hence the - 1). We default to zero if we have
-         * only sent the SYN bit
+         * Don't send a packet for fun.
+         *
+         * If there is no data to send, we aren't sending a new SYN/FIN,
+         * and we aren't explicitly forced to send an ACK, break the loop.
          */
-        uint32_t data_bytes_sent = (tcb->snd_nxt > tcb->iss) ? (tcb->snd_nxt - tcb->iss - 1) : 0;
-
-        /**
-         * Buffered data holds the number of bytes that the user has placed in our buffer that is
-         * waiting to be sent.
-         */
-        uint32_t buffered_data = 0;
-        if (tcb->send_buf_tail > data_bytes_sent) {
-            buffered_data = tcb->send_buf_tail - data_bytes_sent;
+        if (data_length == 0 && !sending_new_syn_fin && !force_send) {
+            break;
         }
 
-        if (receivers_window > unacked_data_in_flight) {
-            uint32_t can_send = receivers_window - unacked_data_in_flight;
+        // 4. Send the segment
+        int bytes_sent = utcp_send_segment(tcb, tcb->snd_nxt, flags, data_length);
+        if (bytes_sent < 0) {
+            break; // Something went wrong at the UDP layer, bail out
+        }
 
-            data_length = (buffered_data < can_send) ? buffered_data : can_send;
+        total_bytes_sent += bytes_sent;
+        segments_sent++;
 
-            // Clamp to MSS (Maximum Segment Size)
-            if (data_length > MSS)
-                data_length = MSS;
+        // We only advance snd_nxt if we actually sent data or a SYN/FIN bit
+        if (data_length > 0 || sending_new_syn_fin) {
+            uint32_t consumed = data_length + (sending_new_syn_fin ? 1 : 0);
+            tcb->snd_nxt += consumed;
 
-        } else {
-            printf("[DEBUG] Window Full: Win=%u | InFlight=%u\n", receivers_window, unacked_data_in_flight);
+            if (tcb->snd_nxt > tcb->snd_max) {
+                tcb->snd_max = tcb->snd_nxt;
+            }
+
+            // Start the retransmission timer if it isn't already running
+            if (tcb->t_timer[TCPT_REXMT] == 0) {
+                tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
+            }
+        }
+
+        // We fulfilled the force_send requirement on the first pass, don't loop it
+        force_send = false;
+
+        // If we just sent an empty ACK or a pure SYN/FIN, we are done looping
+        if (data_length == 0) {
+            break;
         }
     }
 
-    int bytes_sent = utcp_send_segment(tcb, tcb->snd_nxt, flags, data_length);
-
-    // Update TCB counters ONLY if this is new data or a SYN/FIN
-    if (data_length > 0 || (flags & (TH_SYN | TH_FIN))) {
-        uint32_t consumed = data_length + ((flags & (TH_SYN | TH_FIN)) ? 1 : 0);
-        tcb->snd_nxt += consumed;
-
-        if (tcb->snd_nxt > tcb->snd_max)
-            tcb->snd_max = tcb->snd_nxt;
-
-        // If the retransmission timer is not already running, start it
-        if (tcb->t_timer[TCPT_REXMT] == 0) {
-            tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
-        }
+    if (segments_sent > 0) {
+        printf("[UTCP] Burst %d segments. ", segments_sent);
+        PRINT_TCP_VARS(tcb, "OUTPUT POST-SEND");
     }
 
-    PRINT_TCP_VARS(tcb, "OUTPUT POST-SEND");
-    return bytes_sent;
+    return total_bytes_sent;
 }
-
 /**
  * Internal helper to allocate, construct, and send a single TCP segment.
  * Calculates the buffer offset automatically based on the provided sequence number.
