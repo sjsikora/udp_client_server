@@ -1,5 +1,6 @@
 #include "utcp/config.h"
 #include "utcp/net/tcp.h"
+#include "utcp/utcp_output.h"
 #include <stdio.h>
 
 /**

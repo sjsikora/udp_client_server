@@ -10,6 +10,7 @@
 #include <utils.h>
 
 static int pass_to_udp(struct tcp_segment *, size_t, uint32_t, uint16_t, bool);
+static int utcp_send_segment(struct tcb *, uint32_t, uint8_t, size_t);
 
 uint8_t tcp_outflags[] = {
     TH_RST | TH_ACK, 0,      TH_SYN, TH_SYN | TH_ACK, TH_ACK, TH_ACK, TH_FIN | TH_ACK, TH_FIN | TH_ACK,
@@ -111,7 +112,7 @@ int utcp_output(struct tcb *tcb) {
             }
         }
 
-        // 2. Control Packet Safeguard
+        // Control Packet Safeguard
         // We only want to consume sequence space for a SYN or FIN once.
         bool is_syn_fin = (flags & (TH_SYN | TH_FIN)) != 0;
         bool sending_new_syn_fin = is_syn_fin && (tcb->snd_nxt == tcb->snd_max);
@@ -126,7 +127,7 @@ int utcp_output(struct tcb *tcb) {
             break;
         }
 
-        // 4. Send the segment
+        // Send the segment
         int bytes_sent = utcp_send_segment(tcb, tcb->snd_nxt, flags, data_length);
         if (bytes_sent < 0) {
             break; // Something went wrong at the UDP layer, bail out

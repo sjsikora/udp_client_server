@@ -83,6 +83,10 @@ int utcp_input(struct tcb *tcb) {
                     tcb->t_timer[TCPT_REXMT] = 0;
                     tcb->t_rxtshift = 0;
 
+                    struct cc_event_args init_args;
+                    init_args.type = TCP_CC_EVENT_INIT;
+                    tcb->cc_ops->cong_control(tcb, &init_args);
+
                     utcp_output(tcb);
 
                     printf("Connection Established with UTCP server\n");
@@ -98,6 +102,10 @@ int utcp_input(struct tcb *tcb) {
                 // Disarm the retransmission timer
                 tcb->t_timer[TCPT_REXMT] = 0;
                 tcb->t_rxtshift = 0;
+
+                struct cc_event_args init_args;
+                init_args.type = TCP_CC_EVENT_INIT;
+                tcb->cc_ops->cong_control(tcb, &init_args);
 
                 printf("Handshake complete (Server side)\n");
                 break;
@@ -204,6 +212,12 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
             tcb->recv_buf_tail += data_length;
             tcb->rcv_nxt += data_length;
+
+            /**
+             * Note, in the future, this should be replaced with a culmative
+             * ack timer.
+             */
+            tcb->t_flags |= TF_ACKNOW;
 
         } else {
             // Buffer overflow: Usually, you'd drop the packet or truncate
