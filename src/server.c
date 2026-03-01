@@ -27,24 +27,43 @@ int main(int argc, char **argv) {
     utcp_listen(fd);
     utcp_accept(fd);
 
-    // At this point, the three way handshake as been accomplished
+    // At this point, the three way handshake as been accomplished\
+
     char buff[100];
+    int  total_bytes = 0;
 
-    ssize_t n = utcp_read(fd, buff, sizeof(buff) - 1);
+    printf("Waiting for message...\n");
 
-    if (n > 0) {
-        // Ensure the string is null-terminated for safe printing
-        buff[n] = '\0';
-        printf("Received %zd bytes: %s\n", n, buff);
-    } else if (n == 0) {
-        printf("Connection closed by peer (EOF).\n");
-    } else {
-        printf("Error reading from UTCP socket.\n");
+    // Keep reading until we hit the buffer size limit
+    while (total_bytes < sizeof(buff) - 1) {
+
+        // Read available bytes directly into the correct offset of our buffer
+        ssize_t n = utcp_read(fd, (uint8_t *)(buff + total_bytes), sizeof(buff) - 1 - total_bytes);
+
+        if (n > 0) {
+            total_bytes += n;
+
+            // Check if the very last byte is null
+            if (buff[total_bytes - 1] == '\0') {
+                break;
+            }
+        } else if (n == 0) {
+            printf("Connection closed by peer (EOF).\n");
+            break;
+        } else {
+            printf("Error reading from UTCP socket.\n");
+            break;
+        }
     }
+
+    printf("Received full message (%d bytes): %s\n", total_bytes, buff);
 
     char *msg = "I am coming to your cottage.";
 
-    utcp_send(fd, msg, strlen(msg));
+    utcp_send(fd, msg, strlen(msg) + 1);
+
+    while (1) {
+    }
 
     return 0;
 }

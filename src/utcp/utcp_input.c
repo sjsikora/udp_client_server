@@ -87,6 +87,8 @@ int utcp_input(struct tcb *tcb) {
                     init_args.type = TCP_CC_EVENT_INIT;
                     tcb->cc_ops->cong_control(tcb, &init_args);
 
+                    tcb->t_flags |= TF_ACKNOW;
+
                     utcp_output(tcb);
 
                     printf("Connection Established with UTCP server\n");
@@ -108,7 +110,6 @@ int utcp_input(struct tcb *tcb) {
                 tcb->cc_ops->cong_control(tcb, &init_args);
 
                 printf("Handshake complete (Server side)\n");
-                break;
             }
         // Fall through to TCP_ESTABLISHED to handle the data in the same segment
         case TCP_ESTABLISHED:

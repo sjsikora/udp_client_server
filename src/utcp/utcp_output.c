@@ -108,7 +108,8 @@ int utcp_output(struct tcb *tcb) {
             } else {
                 // Window is completely full; we cannot send any more data.
                 data_length = 0;
-                printf("[DEBUG] Window Full: Win=%u | InFlight=%u\n", tcb->snd_wnd, unacked_data_in_flight);
+                printf("[DEBUG] Send window full Win=%u | cwnd=%u | InFlight=%u\n", tcb->snd_wnd, tcb->cwnd,
+                       unacked_data_in_flight);
             }
         }
 

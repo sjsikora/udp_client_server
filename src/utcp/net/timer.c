@@ -51,6 +51,7 @@ void utcp_timers(struct tcb *tcb, int timer) {
 
         // Rollback the sequence pointers
         tcb->snd_nxt = tcb->snd_una;
+
         printf("[UTCP] RTO Expired! Retransmitting sequence %u\n", tcb->snd_nxt);
 
         // Pass dup ACK to the respective cong_control
