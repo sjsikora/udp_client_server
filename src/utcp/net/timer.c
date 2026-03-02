@@ -37,8 +37,9 @@ void utcp_timers(struct tcb *tcb, int timer) {
         // Every time we trigger a retransmission for a packet, we need a back_off_multiplier
         int backoff_multiplier = tcp_backoff[tcb->t_rxtshift];
 
-        // TODO: RTO calculations
-        int new_timer = 2 * backoff_multiplier;
+        // Use dynamically calculated RTO, with a fallback to default if needed.
+        int base_rto = tcb->t_rxtcur > 0 ? tcb->t_rxtcur : TCPTV_SRTTDFLT;
+        int new_timer = base_rto * backoff_multiplier;
 
         // Don't go over 128 or 64 seconds
         if (new_timer > 128)
@@ -146,4 +147,42 @@ void *utcp_slowtimo_thread(void *arg) {
     }
 
     return NULL;
+}
+
+void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks) {
+    if (tcb->t_srtt == 0) {
+        /**
+         * We have no previous measurement. Therefore we calculate with:
+         * First measurement: RTO = RTT + 4 * (RTT / 2)
+         */
+        tcb->t_srtt = rtt_ticks << 3;   // Store SRTT scaled by 8
+        tcb->t_rttvar = rtt_ticks << 1; // Store RTTVAR scaled by 4 (RTTVAR = RTT/2)
+    } else {
+        /**
+         * The following measurements are caclulated with the aplha, beta
+         * learned in COSC 328. In other words, it is the Jacobson/Karels Algorithium.
+         */
+        // delta = R' - (SRTT / 8)
+        int delta = rtt_ticks - (tcb->t_srtt >> 3);
+
+        // SRTT = SRTT + alpha * delta (alpha is 1/8)
+        tcb->t_srtt += delta;
+
+        // RTTVAR = RTTVAR + beta * (|delta| - RTTVAR) (beta is 1/4)
+        if (delta < 0)
+            delta = -delta;
+        tcb->t_rttvar += (delta - (tcb->t_rttvar >> 2));
+    }
+
+    // RTO = SRTT + 4 * RTTVAR
+    tcb->t_rxtcur = (tcb->t_srtt >> 3) + tcb->t_rttvar;
+
+    // Bound the RTO to minimum and maximum values defined in your constants
+    if (tcb->t_rxtcur < TCPTV_MIN) {
+        tcb->t_rxtcur = TCPTV_MIN;
+    } else if (tcb->t_rxtcur > TCPTV_REXMTMAX) {
+        tcb->t_rxtcur = TCPTV_REXMTMAX;
+    }
+
+    printf("[UTCP] RTT Update: Measured=%d ticks, SRTT=%d, RTO=%d\n", rtt_ticks, tcb->t_srtt >> 3, tcb->t_rxtcur);
 }

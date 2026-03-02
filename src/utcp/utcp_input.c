@@ -139,6 +139,15 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         tcb->send_buf_head = tcb->send_buf_head + newly_acked_bytes;
         tcb->snd_wnd = hdr->th_win;
 
+        // If we were tracking a segment and this ACK acknowledges it then stop the timer.
+        if (tcb->t_rtt != 0 && SEQ_GT(ack_num, tcb->t_rtseq)) {
+            // Subtract 1 because we initialized t_rtt to 1 in utcp_output
+            utcp_xmit_timer(tcb, tcb->t_rtt - 1);
+
+            tcb->t_rtt = 0;      // Clear so we can time a new segment
+            tcb->t_rxtshift = 0; // Reset the exponential backoff shift on a successful ACK
+        }
+
         // Retransmission timer
         // If this ACK acknowledges EVERYTHING we have sent, turn off the timer
         if (tcb->snd_una == tcb->snd_max) {

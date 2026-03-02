@@ -150,6 +150,12 @@ int utcp_output(struct tcb *tcb) {
             if (tcb->t_timer[TCPT_REXMT] == 0) {
                 tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
             }
+
+            // Start tracking this segment's RTT if we arent already:
+            if (tcb->t_rtt == 0) {
+                tcb->t_rtseq = tcb->snd_nxt - consumed; // Track the exact sequence number we just transmitted
+                tcb->t_rtt = 1;                         // Start the slowtimo tick counter
+            }
         }
 
         // We fulfilled the force_send requirement on the first pass, don't loop it

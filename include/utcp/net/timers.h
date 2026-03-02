@@ -35,4 +35,6 @@ extern const int tcp_backoff[];
  */
 void *utcp_slowtimo_thread(void *arg);
 
+void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks);
+
 #endif
