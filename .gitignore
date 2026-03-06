@@ -7,3 +7,5 @@ compile_commands.json
 lib/ring_buffer/examples/*
 include/utcp/net/tcp.h
 .vscode/settings.json
+log/*
+out.txt

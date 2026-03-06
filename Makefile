@@ -1,6 +1,11 @@
 # Compiler & flags
 CC := gcc
-CFLAGS := -Wall -Wextra -Iinclude -g -MMD -MP
+# Added -I/usr/local/include for zlog headers
+CFLAGS := -Wall -Wextra -Iinclude -I/usr/local/include -g -MMD -MP
+
+# Added linker flags and libraries for zlog
+LDFLAGS := -L/usr/local/lib
+LDLIBS := -lzlog -lpthread
 
 # Directories
 SRC_DIR := src
@@ -23,15 +28,15 @@ SERVER_OBJS := $(filter-out $(BUILD_DIR)/client.o,$(OBJS))
 # Default target
 all: $(CLIENT_BIN) $(SERVER_BIN)
 
-# Build client
+# Build client (Added LDFLAGS and LDLIBS at the end)
 $(CLIENT_BIN): $(CLIENT_OBJS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-# Build server
+# Build server (Added LDFLAGS and LDLIBS at the end)
 $(SERVER_BIN): $(SERVER_OBJS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 # Compile source files to objects
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c

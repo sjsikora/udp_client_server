@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+#include <zlog.h>
 
 const int tcp_backoff[TCP_MAXRXTSHIFT + 1] = {1, 2, 4, 8, 16, 32, 64, 64, 64, 64, 64, 64, 64};
 
@@ -84,6 +85,9 @@ void utcp_timers(struct tcb *tcb, int timer) {
 }
 
 void *utcp_slowtimo_thread(void *arg) {
+    zlog_put_mdc("thread_name", "Slow_ticker");
+
+    dzlog_debug("Ticker thread wake up");
 
     uint64_t next_tick_time = get_current_time_ms() + TCP_SLOW_TICK_MS;
 

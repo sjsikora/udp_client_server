@@ -12,6 +12,7 @@
 #include <utcp/utcp_output.h>
 #include <utcp/utcp_utils.h>
 #include <utils.h>
+#include <zlog.h>
 
 static void        handle_received_data(struct tcb *, tcphdr *, uint8_t *, ssize_t);
 static ssize_t     Recvfrom(void *, size_t, int, struct sockaddr *__restrict, socklen_t *__restrict);
@@ -19,6 +20,11 @@ static void        deserialize_utcp_packet(uint8_t *, size_t, tcphdr **, uint8_t
 static struct tcb *find_tcb(tcphdr *, uint32_t);
 
 int utcp_input(struct tcb *tcb) {
+    // Init logging
+    zlog_put_mdc("thread_name", "Listen_Thread");
+
+    dzlog_debug("Listen thread initilized");
+
     // Allocate variables we will reuse for every incoming segment
     socklen_t          fromlen;
     struct sockaddr_in from;

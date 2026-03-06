@@ -1,3 +1,4 @@
+#include "logging.h"
 #include "utcp/api.h"
 #include "utcp/utcp_init.h"
 #include <arpa/inet.h>
@@ -10,8 +11,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <utcp/config.h>
+#include <zlog.h>
 
 int main(int argc, char **argv) {
+    init_zlog(1);
+
+    dzlog_debug("Client wake up");
+
     utcp_package_init(0);
     int fd = utcp_socket();
 

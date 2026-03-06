@@ -1,3 +1,4 @@
+#include "logging.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -9,8 +10,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <utcp/api.h>
+#include <zlog.h>
 
 int main(int argc, char **argv) {
+    init_zlog(0);
+    dzlog_debug("Server wake up");
 
     int fd = utcp_socket();
 
@@ -27,7 +31,7 @@ int main(int argc, char **argv) {
     utcp_listen(fd);
     utcp_accept(fd);
 
-    // At this point, the three way handshake as been accomplished\
+    // At this point, the three way handshake as been accomplished
 
     char buff[100];
     int  total_bytes = 0;
@@ -65,5 +69,6 @@ int main(int argc, char **argv) {
     while (1) {
     }
 
+    zlog_fini();
     return 0;
 }
