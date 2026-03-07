@@ -204,8 +204,11 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
     }
 
     /* Recieve window: Handle my acknowledgment */
-    if (data_length <= 0)
+    if (data_length <= 0) {
+        // Output data for new segments if not new data to handle.
+        utcp_output(tcb);
         return;
+    }
 
     uint32_t seq_num = hdr->th_seq;
     dzlog_debug("Processing Data Payload: seq_num=%u, length=%zd, expecting rcv_nxt=%u", seq_num, data_length,
