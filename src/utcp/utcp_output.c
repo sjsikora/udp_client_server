@@ -174,8 +174,11 @@ int utcp_output(struct tcb *tcb) {
                 tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
             }
 
-            // Start tracking this segment's RTT if we arent already:
-            if (tcb->t_rtt == 0) {
+            /**
+             * Start tracking this segment if it is brand new data we haven't sent before,
+             * and we don't have another timer waiting for us.
+             */
+            if (tcb->t_rtt == 0 && (tcb->snd_nxt == tcb->snd_max)) {
                 tcb->t_rtseq = tcb->snd_nxt - consumed; // Track the exact sequence number we just transmitted
                 tcb->t_rtt = 1;                         // Start the slowtimo tick counter
                 dzlog_debug("Started RTT tracking for seq %u", tcb->t_rtseq);

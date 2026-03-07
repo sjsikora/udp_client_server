@@ -17,7 +17,7 @@
 #define SEQ_GEQ(a, b) ((int)((a) - (b)) >= 0)
 
 #define PRINT_TCP_VARS(tcb, label)                                                                                     \
-    dzlog_debug("[%s] STATE: %d | UNA: %u | NXT: %u | MAX: %u | SND_WND: %u | RCV_NXT: %u | RCV_WND: %u\n", label,     \
+    dzlog_debug("[%s] STATE: %d | UNA: %u | NXT: %u | MAX: %u | SND_WND: %u | RCV_NXT: %u | RCV_WND: %u", label,       \
                 (tcb)->state, (tcb)->snd_una, (tcb)->snd_nxt, (tcb)->snd_max, (tcb)->snd_wnd, (tcb)->rcv_nxt,          \
                 (RECV_BUF_SIZE - ((tcb)->recv_buf_tail - (tcb)->recv_buf_head)))
 

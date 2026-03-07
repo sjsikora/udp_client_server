@@ -49,13 +49,19 @@ void utcp_timers(struct tcb *tcb, int timer) {
 
         struct cc_event_args args;
         args.type = TCP_CC_EVENT_TIMEOUT;
-        args.data.timeout.flight_size = tcb->snd_nxt - tcb->snd_una;
+        args.data.timeout.flight_size = tcb->snd_max - tcb->snd_una;
 
         // Rollback the sequence pointers
         tcb->snd_nxt = tcb->snd_una;
 
         dzlog_warn("RTO Expired! Retransmitting sequence %u, flight_size=%u, backoff_shift=%d", tcb->snd_nxt,
                    args.data.timeout.flight_size, tcb->t_rxtshift);
+
+        /**
+         * Reset the RTT timer. If not, when a packet was dropped and an ACK eventually arrives, our RTT timer will
+         * not realize the ACK is for the second attempt and not the first. AKA Karn's Algorithm.
+         */
+        tcb->t_rtt = 0;
 
         // Pass dup ACK to the respective cong_control
         tcb->cc_ops->cong_control(tcb, &args);
