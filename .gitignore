@@ -10,3 +10,4 @@ include/utcp/net/tcp.h
 log/*
 out.txt
 .DS_Store
+*.txt
