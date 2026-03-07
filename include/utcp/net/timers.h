@@ -1,31 +1,32 @@
 #ifndef TIMERS_H
 #define TIMERS_H
 
-#define TCP_SLOW_TICK_MS 500 /* In ms, how long is the slow tick timer*/
+/* In ms, how long is the slow tick timer. Down from 500ms */
+#define TCP_TICK_MS 10
 
-/*
- * Definitions of the TCP timers constants. These timers are counted
- * down PR_SLOWHZ times a second. Timer definitions come from the inet
- * source code.
- */
-#define TCPTV_MSL 60 /* max seg lifetime (hah!) */
+/* Helper macros to convert real time into your tick system */
+#define MS_TO_TICKS(ms)   ((ms) / TCP_TICK_MS)
+#define SEC_TO_TICKS(sec) (((sec) * 1000) / TCP_TICK_MS)
 
-#define TCPTV_MIN      2   /* minimum allowable value */
-#define TCPTV_REXMTMAX 128 /* max allowable REXMT value */
+/* Modernized TCP timer constants defined in ticks */
+#define TCPTV_MSL SEC_TO_TICKS(30) /* 30 seconds max seg lifetime */
 
-#define TCPTV_PERSMIN 10  /* retransmit persistence */
-#define TCPTV_PERSMAX 120 /* maximum persist interval */
+#define TCPTV_MIN      MS_TO_TICKS(200) /* 200ms minimum RTO (Standard modern TCP) */
+#define TCPTV_REXMTMAX SEC_TO_TICKS(64) /* 64 seconds max RTO */
 
-#define TCPTV_KEEP_INIT 150   /* initial connect keepalive */
-#define TCPTV_KEEP_IDLE 14400 /* dflt time before probing */
-#define TCPTV_KEEPINTVL 150   /* default probe interval */
+#define TCPTV_PERSMIN SEC_TO_TICKS(5)  /* 5 seconds retransmit persistence */
+#define TCPTV_PERSMAX SEC_TO_TICKS(60) /* 60 seconds maximum persist interval */
 
-#define TCPTV_SRTTBASE 0 /* base roundtrip time; if 0, no idea yet */
-#define TCPTV_SRTTDFLT 6 /* assumed RTT if no info */
+#define TCPTV_KEEP_INIT SEC_TO_TICKS(75)   /* 75 seconds initial connect keepalive */
+#define TCPTV_KEEP_IDLE SEC_TO_TICKS(7200) /* 2 hours dflt time before probing */
+#define TCPTV_KEEPINTVL SEC_TO_TICKS(75)   /* 75 seconds default probe interval */
 
-#define TCP_LINGERTIME  120 /* linger at most 2 minutes */
-#define TCP_MAXRXTSHIFT 12  /* maximum retransmits */
-#define TCPTV_KEEPCNT   8   /* max probes before drop */
+#define TCPTV_SRTTBASE 0                 /* base roundtrip time */
+#define TCPTV_SRTTDFLT MS_TO_TICKS(1000) /* 1 second assumed RTO if no info (RFC 6298) */
+
+#define TCP_LINGERTIME  SEC_TO_TICKS(120) /* linger at most 2 minutes */
+#define TCP_MAXRXTSHIFT 12                /* maximum retransmits */
+#define TCPTV_KEEPCNT   8                 /* max probes before drop */
 
 // Exponential backoff multipliers for RTO and Persist timers
 extern const int tcp_backoff[];

@@ -43,8 +43,8 @@ void utcp_timers(struct tcb *tcb, int timer) {
         int new_timer = base_rto * backoff_multiplier;
 
         // Don't go over 128 or 64 seconds
-        if (new_timer > 128)
-            new_timer = 128;
+        if (new_timer > TCPTV_REXMTMAX)
+            new_timer = TCPTV_REXMTMAX;
         tcb->t_timer[TCPT_REXMT] = new_timer;
 
         struct cc_event_args args;
@@ -96,9 +96,9 @@ void utcp_timers(struct tcb *tcb, int timer) {
 void *utcp_slowtimo_thread(void *arg) {
     zlog_put_mdc("thread_name", "Slow_ticker");
 
-    dzlog_info("Ticker thread wake up. Tick interval: %d ms", TCP_SLOW_TICK_MS);
+    dzlog_info("Ticker thread wake up. Tick interval: %d ms", TCP_TICK_MS);
 
-    uint64_t next_tick_time = get_current_time_ms() + TCP_SLOW_TICK_MS;
+    uint64_t next_tick_time = get_current_time_ms() + TCP_TICK_MS;
 
     while (1) {
         pthread_mutex_lock(&utcp_table_lock);
@@ -152,11 +152,10 @@ void *utcp_slowtimo_thread(void *arg) {
             uint64_t sleep_time_ms = next_tick_time - now;
             usleep(sleep_time_ms * 1000);
         } else {
-            // Warning: We took longer than 500ms to process!
-            dzlog_warn("utcp_slowtimo missed a tick! Took longer than %d ms to process.", TCP_SLOW_TICK_MS);
+            dzlog_warn("utcp_slowtimo missed a tick! Took longer than %d ms to process.", TCP_TICK_MS);
         }
 
-        next_tick_time += TCP_SLOW_TICK_MS;
+        next_tick_time += TCP_TICK_MS;
     }
 
     return NULL;
