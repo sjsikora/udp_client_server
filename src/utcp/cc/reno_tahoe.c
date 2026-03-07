@@ -10,7 +10,7 @@
  * so we get a baseline for the network. Then we can go on as normal.
  */
 static void cc_shared_init(struct tcb *tcb) {
-    tcb->cwnd = MSS * 10;
+    tcb->cwnd = MSS * IW;
     tcb->ssthresh = 0xFFFFFFFF;
     tcb->ca_state = TCP_CA_OPEN;
     dzlog_debug("CC Init: cwnd=%u, ssthresh=%u, state=OPEN", tcb->cwnd, tcb->ssthresh);
