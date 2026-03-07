@@ -229,6 +229,7 @@ int utcp_accept(int fd) {
 int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     struct tcb               *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
+    (void)addrlen; // Addrlen here to mimic Berkeley Sockets API. This line prevents warning
 
     if (tcb->state != TCP_CLOSED)
         err_sys("TCB is in a invalid state for binding");
@@ -248,6 +249,7 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     struct tcb               *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
+    (void)addrlen; // Addrlen here to mimic Berkeley Sockets API. This line prevents warning
 
     pthread_mutex_lock(&tcb->lock);
 
@@ -266,9 +268,12 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
     wait_until_established(tcb);
     dzlog_info("Successfully connected fd %d!", fd);
+
+    return 0;
 }
 
 int utcp_listen(int fd) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     tcb->state = TCP_LISTEN;
+    return 0;
 }

@@ -94,6 +94,7 @@ void utcp_timers(struct tcb *tcb, int timer) {
 }
 
 void *utcp_slowtimo_thread(void *arg) {
+    (void)arg; // pthread requires arg, but we don't use it. Line here to prevent warning
     zlog_put_mdc("thread_name", "Slow_ticker");
 
     dzlog_info("Ticker thread wake up. Tick interval: %d ms", TCP_TICK_MS);

@@ -19,7 +19,7 @@ static ssize_t     Recvfrom(void *, size_t, int, struct sockaddr *__restrict, so
 static void        deserialize_utcp_packet(uint8_t *, size_t, tcphdr **, uint8_t **, ssize_t *);
 static struct tcb *find_tcb(tcphdr *, uint32_t);
 
-void *utcp_input(struct tcb *tcb) {
+void *utcp_input(void *arg) {
     zlog_put_mdc("thread_name", "Listen_Thread"); // Init logging
 
     dzlog_info("Listen thread initialized and waiting for packets...");
@@ -275,7 +275,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             tcb->rcv_nxt += data_length;
 
             dzlog_info("IN-ORDER DATA ACCEPTED: recv_buf_tail %u -> %u, rcv_nxt %u -> %u. Waking API threads.",
-                       old_tail, tcb->recv_buf_tail, (tcb->rcv_nxt - data_length), tcb->rcv_nxt);
+                       old_tail, tcb->recv_buf_tail, (uint32_t)(tcb->rcv_nxt - data_length), tcb->rcv_nxt);
 
             // Wake up any thread blocking in utcp_read waiting for data
             pthread_cond_broadcast(&tcb->cond_var);

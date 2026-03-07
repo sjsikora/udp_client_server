@@ -18,6 +18,6 @@
  *
  * Finally, if needed, the input will send a request to TCP_INPUT to ack.
  */
-int utcp_input(struct tcb *tcb);
+int utcp_input(void *arg);
 
 #endif

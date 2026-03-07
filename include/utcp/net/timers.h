@@ -1,6 +1,8 @@
 #ifndef TIMERS_H
 #define TIMERS_H
 
+struct tcb;
+
 /* In ms, how long is the slow tick timer. Down from 500ms */
 #define TCP_TICK_MS 10
 

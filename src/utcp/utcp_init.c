@@ -70,7 +70,7 @@ void utcp_package_init(int global_udp_port) {
 static void start_listening() {
     pthread_t input_thread;
 
-    if (pthread_create(&input_thread, NULL, (void *(*)(void *))utcp_input, NULL) != 0) {
+    if (pthread_create(&input_thread, NULL, utcp_input, NULL) != 0) {
         err_sys("Failed to create utcp_input thread");
     }
     // Detach so we don't have to join it later
