@@ -157,6 +157,9 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         dzlog_debug("Window Update: send_buf_head %u -> %u, snd_wnd set to %u", old_head, tcb->send_buf_head,
                     tcb->snd_wnd);
 
+        // Wake up any thread blocked in utcp_send waiting for a buffer
+        pthread_cond_broadcast(&tcb->cond_var);
+
         // If we were tracking a segment and this ACK acknowledges it then stop the timer.
         if (tcb->t_rtt != 0 && SEQ_GT(ack_num, tcb->t_rtseq)) {
             dzlog_debug("RTT Segment ACKed (seq %u). Stopping timer and updating RTO.", tcb->t_rtseq);
@@ -226,7 +229,6 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         if (duplicate_bytes >= data_length) {
             dzlog_warn("DROP: Fully duplicate payload. Seq %u (len %zd) is strictly before rcv_nxt %u. Forcing ACK.",
                        seq_num, data_length, tcb->rcv_nxt);
-            printf("Received fully duplicate data. Re-acking.\n");
             tcb->t_flags |= TF_ACKNOW;
             utcp_output(tcb);
             return;
@@ -258,6 +260,9 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
             dzlog_info("IN-ORDER DATA ACCEPTED: recv_buf_tail %u -> %u, rcv_nxt %u -> %u. Waking API threads.",
                        old_tail, tcb->recv_buf_tail, (tcb->rcv_nxt - data_length), tcb->rcv_nxt);
+
+            // Wake up any thread blocking in utcp_read waiting for data
+            pthread_cond_broadcast(&tcb->cond_var);
 
             /**
              * Note, in the future, this should be replaced with a culmative

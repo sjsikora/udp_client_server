@@ -2,20 +2,12 @@
 #include "utcp/api.h"
 #include "utcp/utcp_init.h"
 #include <arpa/inet.h>
-#include <errno.h>
-#include <netinet/in.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <utcp/config.h>
 #include <zlog.h>
 
 int main(int argc, char **argv) {
     init_zlog(1);
-
     dzlog_debug("Client wake up");
 
     utcp_package_init(0);
@@ -34,35 +26,31 @@ int main(int argc, char **argv) {
 
     char *msg = "Will you... come to my cottage this summer?";
 
+    printf("Client: Attempting to send %zu bytes...\n", strlen(msg) + 1);
+
+    // This will immediately fill the 16-byte buffer and BLOCK.
     utcp_send(fd, msg, strlen(msg) + 1);
 
-    // At this point, the three way handshake as been accomplished
-    char buff[100];
+    printf("Client: Finished sending the entire message!\n");
+
+    // Read the server's response
+    char buff[100] = {0};
     int  total_bytes = 0;
 
-    printf("Waiting for message...\n");
-
-    // Keep reading until we hit the buffer size limit
+    printf("Waiting for server response...\n");
     while (total_bytes < sizeof(buff) - 1) {
-
-        // Read available bytes directly into the correct offset of our buffer
         ssize_t n = utcp_read(fd, (uint8_t *)(buff + total_bytes), sizeof(buff) - 1 - total_bytes);
 
         if (n > 0) {
             total_bytes += n;
-
-            // Check if the very last byte is null
-            if (buff[total_bytes - 1] == '\0') {
+            if (buff[total_bytes - 1] == '\0')
                 break;
-            }
         } else if (n == 0) {
             printf("Connection closed by peer (EOF).\n");
-            break;
-        } else {
-            printf("Error reading from UTCP socket.\n");
             break;
         }
     }
 
     printf("Received full message (%d bytes): %s\n", total_bytes, buff);
+    return 0;
 }

@@ -1,13 +1,7 @@
 #include "logging.h"
 #include <arpa/inet.h>
-#include <errno.h>
-#include <netinet/in.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
 #include <utcp/api.h>
 #include <zlog.h>
@@ -18,57 +12,58 @@ int main(int argc, char **argv) {
 
     int fd = utcp_socket();
 
-    /* Bind UTCP 'local port' 7654 */
     struct sockaddr_in sa = {
         .sin_family = AF_INET,
-        .sin_port = htons(7654), // UTCP port
+        .sin_port = htons(7654),
         .sin_addr.s_addr = inet_addr("127.0.0.1"),
     };
 
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
 
-    printf("Listening for connecting...");
-
-    /* Blocking listen for a SYN and perform handshake */
+    printf("Listening for connections...\n");
     utcp_listen(fd);
     utcp_accept(fd);
 
-    // At this point, the three way handshake as been accomplished
-
-    char buff[100];
+    char buff[100] = {0};
     int  total_bytes = 0;
 
-    printf("Waiting for message...\n");
+    printf("Connection established. Waiting for message...\n");
 
-    // Keep reading until we hit the buffer size limit
     while (total_bytes < sizeof(buff) - 1) {
+        // Force the server to read slowly in 5-byte chunks
+        size_t to_read = 5;
+        if (sizeof(buff) - 1 - total_bytes < to_read) {
+            to_read = sizeof(buff) - 1 - total_bytes;
+        }
 
-        // Read available bytes directly into the correct offset of our buffer
-        ssize_t n = utcp_read(fd, (uint8_t *)(buff + total_bytes), sizeof(buff) - 1 - total_bytes);
+        ssize_t n = utcp_read(fd, (uint8_t *)(buff + total_bytes), to_read);
 
         if (n > 0) {
             total_bytes += n;
+            printf("Server: Read chunk of %zd bytes. Buffer currently: '%s'\n", n, buff);
 
-            // Check if the very last byte is null
             if (buff[total_bytes - 1] == '\0') {
                 break;
             }
+
+            // Sleep for 200ms to allow the 16-byte window to fill and client to block
+            usleep(200000);
         } else if (n == 0) {
             printf("Connection closed by peer (EOF).\n");
-            break;
-        } else {
-            printf("Error reading from UTCP socket.\n");
             break;
         }
     }
 
-    printf("Received full message (%d bytes): %s\n", total_bytes, buff);
+    printf("\nReceived full message (%d bytes): %s\n", total_bytes, buff);
 
-    char *msg = "I am coming to your cottage.";
-
-    utcp_send(fd, msg, strlen(msg) + 1);
+    // Send the reply
+    char *reply = "I am coming to your cottage.";
+    printf("Server: Sending reply...\n");
+    utcp_send(fd, reply, strlen(reply) + 1);
 
     while (1) {
+        // Keep alive to allow client to finish reading before terminating
+        usleep(500000);
     }
 
     zlog_fini();

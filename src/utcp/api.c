@@ -105,29 +105,45 @@ int utcp_socket(void) {
 }
 
 void utcp_send(int fd, const void *buf, size_t len) {
-    struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
+    struct tcb    *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
+    const uint8_t *data_ptr = (const uint8_t *)buf;
+    size_t         remaining = len;
 
     pthread_mutex_lock(&tcb->lock);
 
-    // Check if there is room in buffer. Very very limited right now.
-    uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head;
+    while (remaining > 0) {
+        uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head;
+        uint32_t free_space = SEND_BUF_SIZE - current_buffered;
 
-    if (current_buffered + len > SEND_BUF_SIZE) {
-        pthread_mutex_unlock(&tcb->lock);
-        err_sys("Full buffer can not add data");
+        if (free_space == 0) {
+            // Buffer is full. Sleep until utcp_input processes an ACK and wakes us up.
+            dzlog_debug("Send buffer full on fd %d, blocking application thread...", fd);
+            pthread_cond_wait(&tcb->cond_var, &tcb->lock);
+
+            // If the connection drops while we are asleep, we need to bail out
+            if (tcb->state != TCP_ESTABLISHED) {
+                dzlog_error("Connection closed while blocked in utcp_send");
+                break;
+            }
+            continue; // Re-evaluate free space
+        }
+
+        // Write whatever chunk we have space for
+        size_t to_write = (remaining < free_space) ? remaining : free_space;
+
+        for (size_t i = 0; i < to_write; i++) {
+            tcb->send_buf[(tcb->send_buf_tail + i) % SEND_BUF_SIZE] = data_ptr[i];
+        }
+
+        tcb->send_buf_tail += to_write;
+        data_ptr += to_write;
+        remaining -= to_write;
+
+        dzlog_debug("Added %zu bytes to send buffer on fd %d. %zu bytes remaining.", to_write, fd, remaining);
+
+        // Try to push this chunk out to the network
+        utcp_output(tcb);
     }
-
-    // Add data to the send buffer
-    for (size_t i = 0; i < len; i++) {
-        tcb->send_buf[(tcb->send_buf_tail + i) % SEND_BUF_SIZE] = ((uint8_t *)buf)[i];
-    }
-
-    tcb->send_buf_tail += len;
-
-    dzlog_debug("Added %zu bytes to send buffer on fd %d. Calling utcp_output().", len, fd);
-
-    // Try to send the data
-    utcp_output(tcb);
 
     pthread_mutex_unlock(&tcb->lock);
 
@@ -141,12 +157,12 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     while (tcb->recv_buf_head == tcb->recv_buf_tail) {
         if (tcb->state == TCP_CLOSE_WAIT || tcb->state == TCP_CLOSED) {
             dzlog_error("Socket %d closed or closing during read. Returning 0 bytes.", fd);
+            pthread_mutex_unlock(&tcb->lock);
             return 0;
         }
-        usleep(1000);
+        // Release the lock, sleep, and re-acquire when signaled
+        pthread_cond_wait(&tcb->cond_var, &tcb->lock);
     }
-
-    pthread_mutex_lock(&tcb->lock);
 
     // Look inside the read buffer, read up to passed in buffer length,
     // or read all the data avaiable in the buffer
