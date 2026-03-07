@@ -66,8 +66,8 @@ enum tcp_state {
  * size of the recieve buffer (data recvieved from the send waiting for the user to
  * read) must be a power of two for wrap around logic to work.
  */
-#define SEND_BUF_SIZE 16
-#define RECV_BUF_SIZE 16
+#define SEND_BUF_SIZE 32768
+#define RECV_BUF_SIZE 32768
 
 /**
  * These are the timer indexes. These four timers implement six out of seven

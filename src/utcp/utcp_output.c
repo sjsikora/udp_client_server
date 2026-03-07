@@ -274,7 +274,7 @@ static int pass_to_udp(struct tcp_segment *seg, size_t segment_size, uint32_t ds
      */
     if (packet_risk_drop) {
         int result = rand_r(&random_seed);
-        if ((result % 100) < 10) { // 10% chance
+        if ((result % 100) < 2) { // 2% chance
             dzlog_warn("MOCK NETWORK: Outgoing packet dropped! (Simulated 10%% loss)");
             return segment_size;
         }
