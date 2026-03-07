@@ -174,8 +174,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             tcb->t_timer[TCPT_REXMT] = 0;
         } else {
             // There is still data in flight. Restart the timer for the next segment.
-            dzlog_debug("Data still in flight. Restarting REXMT timer to %d ticks.", TCPTV_SRTTDFLT);
-            tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
+            dzlog_debug("Data still in flight. Restarting REXMT timer to %d ticks.", tcb->t_rxtcur);
+            tcb->t_timer[TCPT_REXMT] = tcb->t_rxtcur;
         }
 
         struct cc_event_args args;
