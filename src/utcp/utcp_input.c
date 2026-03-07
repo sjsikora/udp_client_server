@@ -149,6 +149,9 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Update new oldest unacked number
         tcb->snd_una = ack_num;
 
+        // Clear dup ack counter
+        tcb->t_dupacks = 0;
+
         // Slide the window over
         uint32_t old_head = tcb->send_buf_head;
         tcb->send_buf_head = tcb->send_buf_head + newly_acked_bytes;
@@ -188,6 +191,19 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         tcb->cc_ops->cong_control(tcb, &args);
 
     } else if (ack_num == tcb->snd_una) {
+        /**
+         * Check if this packet is a pure window update packet. This packet may contain
+         * no new data, no extra acknowledgment bytes, but simply to tell us the window
+         * has updated.
+         */
+        if (hdr->th_win > tcb->snd_wnd) {
+            dzlog_info("WINDOW UPDATE: snd_wnd increased from %u to %u", tcb->snd_wnd, hdr->th_win);
+            tcb->snd_wnd = hdr->th_win;
+
+            // Wake up any application thread blocked in utcp_send waiting for window space
+            pthread_cond_broadcast(&tcb->cond_var);
+        }
+
         /* Potential Duplicate ack packet */
         if (data_length == 0 &&             // No data was sent in the segment
             hdr->th_win == tcb->snd_wnd &&  // Send window has not been updated
