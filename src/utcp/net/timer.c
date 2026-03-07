@@ -184,7 +184,8 @@ void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks) {
         // RTTVAR = RTTVAR + beta * (|delta| - RTTVAR) (beta is 1/4)
         if (delta < 0)
             delta = -delta;
-        tcb->t_rttvar += (delta - (tcb->t_rttvar >> 2));
+        delta -= (tcb->t_rttvar >> 2);
+        tcb->t_rttvar += delta;
     }
 
     // RTO = SRTT + 4 * RTTVAR

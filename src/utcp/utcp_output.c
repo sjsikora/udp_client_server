@@ -161,17 +161,10 @@ int utcp_output(struct tcb *tcb) {
             uint32_t consumed = data_length + (sending_new_syn_fin ? 1 : 0);
             tcb->snd_nxt += consumed;
 
-            dzlog_debug("Advancing snd_nxt by %u -> New snd_nxt=%u", consumed, tcb->snd_nxt);
-
-            if (tcb->snd_nxt > tcb->snd_max) {
-                tcb->snd_max = tcb->snd_nxt;
-                dzlog_debug("Advanced snd_max to %u", tcb->snd_max);
-            }
-
             // Start the retransmission timer if it isn't already running
             if (tcb->t_timer[TCPT_REXMT] == 0) {
-                dzlog_debug("Arming REXMT timer to %d ticks", TCPTV_SRTTDFLT);
-                tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
+                dzlog_debug("Arming REXMT timer to %d ticks", tcb->t_rxtcur);
+                tcb->t_timer[TCPT_REXMT] = tcb->t_rxtcur;
             }
 
             /**
@@ -182,6 +175,13 @@ int utcp_output(struct tcb *tcb) {
                 tcb->t_rtseq = tcb->snd_nxt - consumed; // Track the exact sequence number we just transmitted
                 tcb->t_rtt = 1;                         // Start the slowtimo tick counter
                 dzlog_debug("Started RTT tracking for seq %u", tcb->t_rtseq);
+            }
+
+            dzlog_debug("Advancing snd_nxt by %u -> New snd_nxt=%u", consumed, tcb->snd_nxt);
+
+            if (tcb->snd_nxt > tcb->snd_max) {
+                tcb->snd_max = tcb->snd_nxt;
+                dzlog_debug("Advanced snd_max to %u", tcb->snd_max);
             }
         }
 

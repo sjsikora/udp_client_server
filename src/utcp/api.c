@@ -1,4 +1,5 @@
 #include "utcp/cc/reno_tahoe.h"
+#include "utcp/net/timers.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -85,7 +86,11 @@ int utcp_socket(void) {
     pthread_mutex_init(&tcb->lock, NULL);
     pthread_cond_init(&tcb->cond_var, NULL);
 
-    tcb->cc_ops = &utcp_tahoe;
+    // tcb->cc_ops = &utcp_tahoe;
+    tcb->cc_ops = &utcp_reno;
+
+    // Set timer to default value
+    tcb->t_rxtcur = TCPTV_SRTTDFLT;
 
     // Init acknowledgment numbers
     tcb->iss = 0;
