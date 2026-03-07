@@ -96,6 +96,7 @@ int utcp_socket(void) {
     tcb->iss = 0;
     tcb->snd_una = tcb->iss;
     tcb->snd_nxt = tcb->iss;
+    tcb->rcv_wnd = RECV_BUF_SIZE;
 
     utcp_fd_table[utcp_fd] = tcb;
     pthread_mutex_unlock(&utcp_table_lock);
