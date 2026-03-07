@@ -19,11 +19,10 @@ static ssize_t     Recvfrom(void *, size_t, int, struct sockaddr *__restrict, so
 static void        deserialize_utcp_packet(uint8_t *, size_t, tcphdr **, uint8_t **, ssize_t *);
 static struct tcb *find_tcb(tcphdr *, uint32_t);
 
-int utcp_input(struct tcb *tcb) {
-    // Init logging
-    zlog_put_mdc("thread_name", "Listen_Thread");
+void *utcp_input(struct tcb *tcb) {
+    zlog_put_mdc("thread_name", "Listen_Thread"); // Init logging
 
-    dzlog_debug("Listen thread initilized");
+    dzlog_info("Listen thread initialized and waiting for packets...");
 
     // Allocate variables we will reuse for every incoming segment
     socklen_t          fromlen;
@@ -50,13 +49,15 @@ int utcp_input(struct tcb *tcb) {
 
         PRINT_TCP_VARS(tcb, "INPUT PRE-PROC");
 
-        if (tcb == NULL)
+        if (tcb == NULL) {
+            dzlog_warn("UTCP packet came with no active socket (Drop). Src IP: %u", ntohl(from.sin_addr.s_addr));
             err_sys("UTCP packet came with no active socket");
+        }
 
         switch (tcb->state) {
         case TCP_LISTEN: // If SYN flag set, accept new conneciton
             if (hdr->th_flags & TH_SYN) {
-                printf("Received SYN from %u:%d\n", ntohl(from.sin_addr.s_addr), hdr->th_sport);
+                dzlog_info("Received SYN from %u:%d", ntohl(from.sin_addr.s_addr), hdr->th_sport);
 
                 tcb->dst_port = hdr->th_sport;
                 tcb->dst_ip = ntohl(from.sin_addr.s_addr);
@@ -97,7 +98,7 @@ int utcp_input(struct tcb *tcb) {
 
                     utcp_output(tcb);
 
-                    printf("Connection Established with UTCP server\n");
+                    dzlog_info("Connection Established with UTCP server");
                 }
             }
             break;
@@ -115,11 +116,14 @@ int utcp_input(struct tcb *tcb) {
                 init_args.type = TCP_CC_EVENT_INIT;
                 tcb->cc_ops->cong_control(tcb, &init_args);
 
-                printf("Handshake complete (Server side)\n");
+                dzlog_info("Handshake complete (Server side). Connection ESTABLISHED.");
             }
         // Fall through to TCP_ESTABLISHED to handle the data in the same segment
         case TCP_ESTABLISHED:
             handle_received_data(tcb, hdr, data, data_length);
+            break;
+        default:
+            dzlog_debug("Unhandled TCP state %d in utcp_input", tcb->state);
             break;
         }
 
@@ -127,6 +131,7 @@ int utcp_input(struct tcb *tcb) {
     }
     // Unreachable code
     free(buff);
+    return NULL;
 }
 
 static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ssize_t data_length) {
@@ -138,15 +143,23 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
     ) {
         uint32_t newly_acked_bytes = ack_num - tcb->snd_una;
 
+        dzlog_info("VALID ACK: Advancing snd_una from %u to %u (acked %u bytes)", tcb->snd_una, ack_num,
+                   newly_acked_bytes);
+
         // Update new oldest unacked number
         tcb->snd_una = ack_num;
 
         // Slide the window over
+        uint32_t old_head = tcb->send_buf_head;
         tcb->send_buf_head = tcb->send_buf_head + newly_acked_bytes;
         tcb->snd_wnd = hdr->th_win;
 
+        dzlog_debug("Window Update: send_buf_head %u -> %u, snd_wnd set to %u", old_head, tcb->send_buf_head,
+                    tcb->snd_wnd);
+
         // If we were tracking a segment and this ACK acknowledges it then stop the timer.
         if (tcb->t_rtt != 0 && SEQ_GT(ack_num, tcb->t_rtseq)) {
+            dzlog_debug("RTT Segment ACKed (seq %u). Stopping timer and updating RTO.", tcb->t_rtseq);
             // Subtract 1 because we initialized t_rtt to 1 in utcp_output
             utcp_xmit_timer(tcb, tcb->t_rtt - 1);
 
@@ -157,9 +170,11 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Retransmission timer
         // If this ACK acknowledges EVERYTHING we have sent, turn off the timer
         if (tcb->snd_una == tcb->snd_max) {
+            dzlog_debug("All flight data ACKed. Disarming REXMT timer.");
             tcb->t_timer[TCPT_REXMT] = 0;
         } else {
             // There is still data in flight. Restart the timer for the next segment.
+            dzlog_debug("Data still in flight. Restarting REXMT timer to %d ticks.", TCPTV_SRTTDFLT);
             tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
         }
 
@@ -176,7 +191,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             tcb->snd_una != tcb->snd_max) { // There is data in flight
 
             tcb->t_dupacks++;
-            printf("[UTCP] Dup ack detected %u\n", tcb->snd_una);
+            dzlog_warn("DUPLICATE ACK detected for seq %u (Count: %d). snd_max=%u", tcb->snd_una, tcb->t_dupacks,
+                       tcb->snd_max);
 
             struct cc_event_args args;
             args.type = TCP_CC_EVENT_DUP_ACK;
@@ -192,6 +208,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         return;
 
     uint32_t seq_num = hdr->th_seq;
+    dzlog_debug("Processing Data Payload: seq_num=%u, length=%zd, expecting rcv_nxt=%u", seq_num, data_length,
+                tcb->rcv_nxt);
 
     /**
      * Case that the sequence number is past our expectation.
@@ -203,6 +221,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
         // Case packet is full duplicate
         if (duplicate_bytes >= data_length) {
+            dzlog_warn("DROP: Fully duplicate payload. Seq %u (len %zd) is strictly before rcv_nxt %u. Forcing ACK.",
+                       seq_num, data_length, tcb->rcv_nxt);
             printf("Received fully duplicate data. Re-acking.\n");
             tcb->t_flags |= TF_ACKNOW;
             utcp_output(tcb);
@@ -210,7 +230,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         }
 
         // Case some bytes are new some are old. Trim the data down.
-        printf("Partially overlapping data. Trimming first %u bytes.\n", duplicate_bytes);
+        dzlog_info("OVERLAP: Trimming first %u duplicate bytes from payload. seq_num: %u -> %u, datalen: %zd -> %zd",
+                   duplicate_bytes, seq_num, seq_num + duplicate_bytes, data_length, data_length - duplicate_bytes);
         seq_num += duplicate_bytes;
         data += duplicate_bytes;
         data_length -= duplicate_bytes;
@@ -220,14 +241,20 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
         // See how much room we have left in the buffer
         uint32_t free_space = RECV_BUF_SIZE - (tcb->recv_buf_tail - tcb->recv_buf_head);
+        dzlog_debug("Buffer Check: free_space=%u, incoming_data=%zd", free_space, data_length);
 
         if (data_length <= (ssize_t)free_space) { // For every byte of data, copy into ring buffer
+            uint32_t old_tail = tcb->recv_buf_tail;
+
             for (ssize_t i = 0; i < data_length; i++) {
                 tcb->recv_buf[(tcb->recv_buf_tail + i) % RECV_BUF_SIZE] = data[i];
             }
 
             tcb->recv_buf_tail += data_length;
             tcb->rcv_nxt += data_length;
+
+            dzlog_info("IN-ORDER DATA ACCEPTED: recv_buf_tail %u -> %u, rcv_nxt %u -> %u. Waking API threads.",
+                       old_tail, tcb->recv_buf_tail, (tcb->rcv_nxt - data_length), tcb->rcv_nxt);
 
             /**
              * Note, in the future, this should be replaced with a culmative
@@ -237,11 +264,12 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
         } else {
             // Buffer overflow: Usually, you'd drop the packet or truncate
-            printf("Receive buffer full, dropping data.\n");
+            dzlog_error("DROP (OOM): Receive buffer full! Free space %u, but tried to insert %zd bytes.", free_space,
+                        data_length);
             return;
         }
     } else {
-        printf("Received out-of-order packet. Expected %u, got %u\n", tcb->rcv_nxt, seq_num);
+        dzlog_warn("OUT OF ORDER: Expected %u, got %u. Dropping payload and forcing ACK.", tcb->rcv_nxt, seq_num);
         tcb->t_flags |= TF_ACKNOW;
     }
 

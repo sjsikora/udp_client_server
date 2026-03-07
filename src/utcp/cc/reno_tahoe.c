@@ -2,6 +2,7 @@
 #include "utcp/net/tcp.h"
 #include "utcp/utcp_output.h"
 #include <stdio.h>
+#include <zlog.h>
 
 /**
  * Init our variables in the tcb. Note, we set things
@@ -12,6 +13,7 @@ static void cc_shared_init(struct tcb *tcb) {
     tcb->cwnd = MSS * 10;
     tcb->ssthresh = 0xFFFFFFFF;
     tcb->ca_state = TCP_CA_OPEN;
+    dzlog_debug("CC Init: cwnd=%u, ssthresh=%u, state=OPEN", tcb->cwnd, tcb->ssthresh);
 }
 
 /**
@@ -29,12 +31,15 @@ static uint32_t cc_shared_calc_ssthresh(uint32_t flight_size) {
  * or we are in CA phase. This function will increase the cwnd accordingly.
  */
 static void cc_shared_aimd(struct tcb *tcb, uint32_t acked) {
+    uint32_t old_cwnd = tcb->cwnd;
     if (tcb->cwnd < tcb->ssthresh) {
         // Slow Start
         tcb->cwnd += acked;
+        dzlog_debug("Slow Start: cwnd %u -> %u (ssthresh=%u)", old_cwnd, tcb->cwnd, tcb->ssthresh);
     } else {
         // Congestion Avoidance (approx. 1 MSS per RTT)
         tcb->cwnd += (MSS * MSS) / tcb->cwnd;
+        dzlog_debug("Congestion Avoidance: cwnd %u -> %u", old_cwnd, tcb->cwnd);
     }
 }
 
@@ -45,6 +50,7 @@ static void cc_shared_timeout(struct tcb *tcb, uint32_t flight_size) {
     tcb->ssthresh = cc_shared_calc_ssthresh(flight_size);
     tcb->cwnd = MSS; // Hard drop to 1 MSS
     tcb->ca_state = TCP_CA_LOSS;
+    dzlog_warn("Timeout: Hard drop! flight_size=%u, new ssthresh=%u, cwnd=%u", flight_size, tcb->ssthresh, tcb->cwnd);
 }
 
 static void tahoe_cong_control(struct tcb *tcb, const struct cc_event_args *args) {
@@ -62,6 +68,8 @@ static void tahoe_cong_control(struct tcb *tcb, const struct cc_event_args *args
         // Tahoe treats 3 dup ACKs as a hard loss (just like a timeout)
         if (args->data.dup.total_dups == 3) {
             uint32_t flight_size = tcb->snd_nxt - tcb->snd_una;
+            dzlog_warn("Tahoe 3 Dup ACKs: Treating as timeout. flight_size=%u", flight_size);
+
             cc_shared_timeout(tcb, flight_size);
 
             utcp_retransmit_segment(tcb, tcb->snd_una);
@@ -88,6 +96,8 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         if (tcb->ca_state == TCP_CA_RECOVERY) {
             tcb->cwnd = tcb->ssthresh; // Deflate the artificially inflated window
             tcb->ca_state = TCP_CA_OPEN;
+            dzlog_info("Reno exiting Fast Recovery: cwnd deflated to %u", tcb->cwnd);
+            return;
         }
 
         // Proceed with normal growth
@@ -105,16 +115,20 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
             tcb->cwnd = tcb->ssthresh + (3 * MSS);
             tcb->ca_state = TCP_CA_RECOVERY;
 
+            dzlog_warn("Reno Fast Retransmit/Recovery: flight_size=%u, ssthresh=%u, inflated cwnd=%u", flight_size,
+                       tcb->ssthresh, tcb->cwnd);
+
             // Try to retransmit that missing segment
             utcp_retransmit_segment(tcb, tcb->snd_una);
 
         } else if (args->data.dup.total_dups > 3 && tcb->ca_state == TCP_CA_RECOVERY) {
             tcb->cwnd += MSS;
 
+            dzlog_debug("Reno Fast Recovery: duplicate ACK received, inflating cwnd to %u", tcb->cwnd);
+
             // While in fast recovery, try to transmit more data
             utcp_output(tcb);
         }
-        break;
         break;
 
     case TCP_CC_EVENT_TIMEOUT:

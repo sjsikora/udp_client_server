@@ -54,13 +54,16 @@ void utcp_timers(struct tcb *tcb, int timer) {
         // Rollback the sequence pointers
         tcb->snd_nxt = tcb->snd_una;
 
-        printf("[UTCP] RTO Expired! Retransmitting sequence %u\n", tcb->snd_nxt);
+        dzlog_warn("RTO Expired! Retransmitting sequence %u, flight_size=%u, backoff_shift=%d", tcb->snd_nxt,
+                   args.data.timeout.flight_size, tcb->t_rxtshift);
 
         // Pass dup ACK to the respective cong_control
         tcb->cc_ops->cong_control(tcb, &args);
 
         // Force retransmission
         utcp_output(tcb);
+
+        break;
 
     /**
      * Fired when the receiver advertised a window of 0, and we
@@ -87,7 +90,7 @@ void utcp_timers(struct tcb *tcb, int timer) {
 void *utcp_slowtimo_thread(void *arg) {
     zlog_put_mdc("thread_name", "Slow_ticker");
 
-    dzlog_debug("Ticker thread wake up");
+    dzlog_info("Ticker thread wake up. Tick interval: %d ms", TCP_SLOW_TICK_MS);
 
     uint64_t next_tick_time = get_current_time_ms() + TCP_SLOW_TICK_MS;
 
@@ -144,7 +147,7 @@ void *utcp_slowtimo_thread(void *arg) {
             usleep(sleep_time_ms * 1000);
         } else {
             // Warning: We took longer than 500ms to process!
-            printf("[WARNING] utcp_slowtimo missed a tick!\n");
+            dzlog_warn("utcp_slowtimo missed a tick! Took longer than %d ms to process.", TCP_SLOW_TICK_MS);
         }
 
         next_tick_time += TCP_SLOW_TICK_MS;
@@ -188,5 +191,5 @@ void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks) {
         tcb->t_rxtcur = TCPTV_REXMTMAX;
     }
 
-    printf("[UTCP] RTT Update: Measured=%d ticks, SRTT=%d, RTO=%d\n", rtt_ticks, tcb->t_srtt >> 3, tcb->t_rxtcur);
+    dzlog_debug("RTT Update: Measured=%d ticks, SRTT=%d, RTO=%d", rtt_ticks, tcb->t_srtt >> 3, tcb->t_rxtcur);
 }

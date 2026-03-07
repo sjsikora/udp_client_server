@@ -13,6 +13,7 @@
 #include <utcp/utcp_output.h>
 #include <utcp/utcp_utils.h>
 #include <utils.h>
+#include <zlog.h>
 
 /**
  * Spin wait until the tcb is established. We are able to do this because
@@ -23,6 +24,7 @@ static void wait_until_established(struct tcb *tcb) {
     while (tcb->state != TCP_ESTABLISHED) {
         usleep(1000);
     }
+    dzlog_debug("TCB state is now TCP_ESTABLISHED.");
 }
 
 /**
@@ -93,6 +95,7 @@ int utcp_socket(void) {
     utcp_fd_table[utcp_fd] = tcb;
     pthread_mutex_unlock(&utcp_table_lock);
 
+    dzlog_info("Successfully allocated UTCP socket fd %d", utcp_fd);
     return utcp_fd;
 }
 
@@ -104,8 +107,10 @@ void utcp_send(int fd, const void *buf, size_t len) {
     // Check if there is room in buffer. Very very limited right now.
     uint32_t current_buffered = tcb->send_buf_tail - tcb->send_buf_head;
 
-    if (current_buffered + len > SEND_BUF_SIZE)
+    if (current_buffered + len > SEND_BUF_SIZE) {
+        pthread_mutex_unlock(&tcb->lock);
         err_sys("Full buffer can not add data");
+    }
 
     // Add data to the send buffer
     for (size_t i = 0; i < len; i++) {
@@ -113,6 +118,8 @@ void utcp_send(int fd, const void *buf, size_t len) {
     }
 
     tcb->send_buf_tail += len;
+
+    dzlog_debug("Added %zu bytes to send buffer on fd %d. Calling utcp_output().", len, fd);
 
     // Try to send the data
     utcp_output(tcb);
@@ -128,9 +135,10 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     // Spin wait for data if there is nothing to read in the buffer
     while (tcb->recv_buf_head == tcb->recv_buf_tail) {
         if (tcb->state == TCP_CLOSE_WAIT || tcb->state == TCP_CLOSED) {
+            dzlog_error("Socket %d closed or closing during read. Returning 0 bytes.", fd);
             return 0;
         }
-        usleep(1000000);
+        usleep(1000);
     }
 
     pthread_mutex_lock(&tcb->lock);
@@ -138,8 +146,7 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     // Look inside the read buffer, read up to passed in buffer length,
     // or read all the data avaiable in the buffer
     uint32_t avaiable_bytes_to_read = tcb->recv_buf_tail - tcb->recv_buf_head;
-
-    size_t num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
+    size_t   num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
 
     for (size_t i = 0; i < num_bytes_to_read; i++) {
         buf[i] = tcb->recv_buf[(tcb->recv_buf_head + i) % RECV_BUF_SIZE];
@@ -157,13 +164,16 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     // So, we add this condition to ensure we only send an window update if it is significant
     // that being if the rcv_wnd is one MSS long or we were previously at 0 rcv_wnd.
     if (tcb->rcv_wnd >= MSS || (tcb->rcv_wnd < MSS && avaiable_bytes_to_read == RECV_BUF_SIZE)) {
+        dzlog_debug("SWS triggered on fd %d: Sending window update (rcv_wnd=%u)", fd, tcb->rcv_wnd);
         tcb->t_flags |= TF_ACKNOW;
         utcp_output(tcb);
     }
 
     pthread_mutex_unlock(&tcb->lock);
 
-    return avaiable_bytes_to_read;
+    dzlog_debug("Successfully read %zu bytes from fd %d", num_bytes_to_read, fd);
+
+    return (int)num_bytes_to_read;
 }
 
 int utcp_accept(int fd) {
@@ -175,11 +185,12 @@ int utcp_accept(int fd) {
      */
     if (tcb->state != TCP_LISTEN && tcb->state != TCP_SYN_RECV) {
         if (tcb->state == TCP_ESTABLISHED)
-            return fd;
+            dzlog_info("Socket %d is already ESTABLISHED, accepting immediately.", fd);
+        return fd;
         err_sys("utcp_accept called on a socket that isn't listening");
     }
 
-    printf("[UTCP] utcp_accept: Waiting for incoming handshake...\n");
+    dzlog_debug("Spin waiting for a incoming handshake.");
 
     /**
      * Spin waits until there is a tcb connection. Note, in the future and
@@ -188,7 +199,7 @@ int utcp_accept(int fd) {
      */
     wait_until_established(tcb);
 
-    printf("[UTCP] utcp_accept: Connection established!\n");
+    dzlog_debug("Connection established!");
 
     return 0;
 }
@@ -207,6 +218,8 @@ int utcp_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     tcb->src_ip = ntohl(sin->sin_addr.s_addr);
     tcb->src_port = ntohs(sin->sin_port);
 
+    dzlog_info("Successfully bound fd %d to port %u", fd, tcb->src_port);
+
     return 0;
 }
 
@@ -224,11 +237,13 @@ int utcp_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     tcb->dst_udp_port = 1970; // UTCP server hardcoded for now
 
     tcb->state = TCP_SYN_SENT;
+    dzlog_debug("Sending SYN for fd %d...", fd);
     utcp_output(tcb);
 
-    pthread_mutex_unlock(&tcb->lock);
+    pthread_mutex_unlock(&tcb->lock); // Unlock here because the listen thread will handle the rest
 
     wait_until_established(tcb);
+    dzlog_info("Successfully connected fd %d!", fd);
 }
 
 int utcp_listen(int fd) {

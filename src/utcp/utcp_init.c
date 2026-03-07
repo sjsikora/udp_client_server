@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <utils.h>
+#include <zlog.h>
 
 static void start_listening();
 static void start_ticking();
@@ -23,10 +24,13 @@ pthread_mutex_t utcp_table_lock;
 unsigned int    random_seed = 67;
 
 void utcp_package_init(int global_udp_port) {
-    if (utcp_initialized)
+    if (utcp_initialized) {
+        dzlog_debug("UTCP package already initialized. Skipping.");
         return;
+    }
 
     // Bind a UDP port on IPv4 on given port
+    dzlog_info("Initializing UTCP package on requested UDP port %d...", global_udp_port);
 
     const struct sockaddr_in addr = {
         .sin_family = AF_INET,                     // Listen on IPv4
@@ -49,15 +53,15 @@ void utcp_package_init(int global_udp_port) {
         err_sys("getsockname failed");
 
     UDP_PORT = ntohs(bound_addr.sin_port);
-    printf("[UTCP] UTCP package is initlized and is listening on port %u\n", UDP_PORT);
+    dzlog_info("UTCP package is initialized and successfully bound to true UDP port %u", UDP_PORT);
 
     // Init global utcp_fd lock
     pthread_mutex_init(&utcp_table_lock, NULL);
 
+    utcp_initialized = 1;
+
     start_listening();
     start_ticking();
-
-    utcp_initialized = 1;
 }
 
 /**
@@ -79,4 +83,6 @@ static void start_ticking() {
     if (pthread_create(&ticking_thread, NULL, (void *(*)(void *))utcp_slowtimo_thread, NULL) != 0) {
         err_sys("Failed to create utcp_slowtimo thread");
     }
+
+    pthread_detach(ticking_thread);
 }

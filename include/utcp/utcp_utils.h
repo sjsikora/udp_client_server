@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <utcp/net/tcp.h>
+#include <zlog.h>
 
 #define SEQ_LT(a, b)  ((int)((a) - (b)) < 0)
 #define SEQ_LEQ(a, b) ((int)((a) - (b)) <= 0)
@@ -16,9 +17,9 @@
 #define SEQ_GEQ(a, b) ((int)((a) - (b)) >= 0)
 
 #define PRINT_TCP_VARS(tcb, label)                                                                                     \
-    printf("[%s] STATE: %d | UNA: %u | NXT: %u | MAX: %u | SND_WND: %u | RCV_NXT: %u | RCV_WND: %u\n", label,          \
-           (tcb)->state, (tcb)->snd_una, (tcb)->snd_nxt, (tcb)->snd_max, (tcb)->snd_wnd, (tcb)->rcv_nxt,               \
-           (RECV_BUF_SIZE - ((tcb)->recv_buf_tail - (tcb)->recv_buf_head)))
+    dzlog_debug("[%s] STATE: %d | UNA: %u | NXT: %u | MAX: %u | SND_WND: %u | RCV_NXT: %u | RCV_WND: %u\n", label,     \
+                (tcb)->state, (tcb)->snd_una, (tcb)->snd_nxt, (tcb)->snd_max, (tcb)->snd_wnd, (tcb)->rcv_nxt,          \
+                (RECV_BUF_SIZE - ((tcb)->recv_buf_tail - (tcb)->recv_buf_head)))
 
 /*
  * @brief Print out the contents of a tcp header

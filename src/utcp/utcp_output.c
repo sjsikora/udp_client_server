@@ -8,6 +8,7 @@
 #include <utcp/utcp_output.h>
 #include <utcp/utcp_utils.h>
 #include <utils.h>
+#include <zlog.h>
 
 static int pass_to_udp(struct tcp_segment *, size_t, uint32_t, uint16_t, bool);
 static int utcp_send_segment(struct tcb *, uint32_t, uint8_t, size_t);
@@ -22,6 +23,8 @@ uint8_t tcp_outflags[] = {
  * Safe to call during Fast Recovery because it does not advance snd_nxt.
  */
 int utcp_retransmit_segment(struct tcb *tcb, uint32_t seq) {
+    dzlog_info("--- [RETRANSMISSION REQUESTED] --- Target Seq: %u", seq);
+
     if (tcb->state != TCP_ESTABLISHED) {
         return 0;
     }
@@ -39,6 +42,9 @@ int utcp_retransmit_segment(struct tcb *tcb, uint32_t seq) {
     // We only retransmit up to 1 MSS at a time
     size_t data_length = (buffered_data < MSS) ? buffered_data : MSS;
 
+    dzlog_debug("Retransmit calculations: data_bytes_sent=%u, buffered_data=%u, taking %zu bytes.", data_bytes_sent,
+                buffered_data, data_length);
+
     // Send it! (Using the target seq, not snd_nxt)
     int bytes_sent = utcp_send_segment(tcb, seq, flags, data_length);
 
@@ -54,9 +60,12 @@ int utcp_output(struct tcb *tcb) {
     uint8_t flags = tcp_outflags[tcb->state];
     bool    force_send = false;
 
+    dzlog_debug("utcp_output triggered. Initial state: %d, Base Flags: 0x%02X", tcb->state, flags);
+
     // Check if we have been ordered to force an ACK out
     if (tcb->t_flags & TF_ACKNOW) {
         force_send = true;
+        dzlog_debug("TF_ACKNOW flag detected. Forcing packet send.");
         tcb->t_flags &= ~TF_ACKNOW; // Clear the flag immediately
     }
 
@@ -96,6 +105,9 @@ int utcp_output(struct tcb *tcb) {
                 buffered_data = tcb->send_buf_tail - data_bytes_sent;
             }
 
+            dzlog_debug("Window Calc: snd_wnd=%u, cwnd=%u -> Effective Win=%u. InFlight=%u, Buffered=%u", tcb->snd_wnd,
+                        tcb->cwnd, send_window, unacked_data_in_flight, buffered_data);
+
             // Determine how much data we can pack into this specific segment
             if (send_window > unacked_data_in_flight) {
                 uint32_t can_send = send_window - unacked_data_in_flight;
@@ -105,11 +117,15 @@ int utcp_output(struct tcb *tcb) {
                 if (data_length > MSS) {
                     data_length = MSS;
                 }
+
+                if (data_length > 0) {
+                    dzlog_info("Preparing to send %zu bytes of payload.", data_length);
+                }
             } else {
                 // Window is completely full; we cannot send any more data.
                 data_length = 0;
-                printf("[DEBUG] Send window full Win=%u | cwnd=%u | InFlight=%u\n", tcb->snd_wnd, tcb->cwnd,
-                       unacked_data_in_flight);
+                dzlog_debug("Send window full (or blocked by cwnd). Win=%u | cwnd=%u | InFlight=%u", tcb->snd_wnd,
+                            tcb->cwnd, unacked_data_in_flight);
             }
         }
 
@@ -125,12 +141,15 @@ int utcp_output(struct tcb *tcb) {
          * and we aren't explicitly forced to send an ACK, break the loop.
          */
         if (data_length == 0 && !sending_new_syn_fin && !force_send) {
+            dzlog_debug("Nothing to send. Breaking output loop.");
             break;
         }
 
         // Send the segment
+        dzlog_debug("Dispatching segment (Seq: %u, Flags: 0x%02X, DataLen: %zu)", tcb->snd_nxt, flags, data_length);
         int bytes_sent = utcp_send_segment(tcb, tcb->snd_nxt, flags, data_length);
         if (bytes_sent < 0) {
+            dzlog_error("utcp_send_segment failed. Bailing out of output loop.");
             break; // Something went wrong at the UDP layer, bail out
         }
 
@@ -142,12 +161,16 @@ int utcp_output(struct tcb *tcb) {
             uint32_t consumed = data_length + (sending_new_syn_fin ? 1 : 0);
             tcb->snd_nxt += consumed;
 
+            dzlog_debug("Advancing snd_nxt by %u -> New snd_nxt=%u", consumed, tcb->snd_nxt);
+
             if (tcb->snd_nxt > tcb->snd_max) {
                 tcb->snd_max = tcb->snd_nxt;
+                dzlog_debug("Advanced snd_max to %u", tcb->snd_max);
             }
 
             // Start the retransmission timer if it isn't already running
             if (tcb->t_timer[TCPT_REXMT] == 0) {
+                dzlog_debug("Arming REXMT timer to %d ticks", TCPTV_SRTTDFLT);
                 tcb->t_timer[TCPT_REXMT] = TCPTV_SRTTDFLT;
             }
 
@@ -155,6 +178,7 @@ int utcp_output(struct tcb *tcb) {
             if (tcb->t_rtt == 0) {
                 tcb->t_rtseq = tcb->snd_nxt - consumed; // Track the exact sequence number we just transmitted
                 tcb->t_rtt = 1;                         // Start the slowtimo tick counter
+                dzlog_debug("Started RTT tracking for seq %u", tcb->t_rtseq);
             }
         }
 
@@ -168,7 +192,7 @@ int utcp_output(struct tcb *tcb) {
     }
 
     if (segments_sent > 0) {
-        printf("[UTCP] Burst %d segments. ", segments_sent);
+        dzlog_info("utcp_output completed. Burst %d segments, %d total bytes.", segments_sent, total_bytes_sent);
         PRINT_TCP_VARS(tcb, "OUTPUT POST-SEND");
     }
 
@@ -203,7 +227,20 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
     // Copy payload from the ring buffer based on the specific sequence number
     if (data_length > 0) {
         uint32_t buf_offset = (seq - tcb->iss - 1) % SEND_BUF_SIZE;
-        memcpy(seg->data, &tcb->send_buf[buf_offset], data_length);
+
+        if (buf_offset + data_length <= SEND_BUF_SIZE) {
+            // Safe continuous copy
+            memcpy(seg->data, &tcb->send_buf[buf_offset], data_length);
+        } else {
+            // Buffer wraps around! Split the copy into two parts.
+            size_t part1_len = SEND_BUF_SIZE - buf_offset;
+            size_t part2_len = data_length - part1_len;
+
+            dzlog_debug("Ring buffer wrap! Copying %zu bytes from end, %zu bytes from start.", part1_len, part2_len);
+
+            memcpy(seg->data, &tcb->send_buf[buf_offset], part1_len);
+            memcpy(seg->data + part1_len, &tcb->send_buf[0], part2_len);
+        }
     }
 
     debug_print_tcp_packet(&seg->hdr, true, seg->data, data_length);
@@ -235,7 +272,7 @@ static int pass_to_udp(struct tcp_segment *seg, size_t segment_size, uint32_t ds
     if (packet_risk_drop) {
         int result = rand_r(&random_seed);
         if ((result % 100) < 10) { // 10% chance
-            printf("[UTCP] Outgoing packet dropped!\n");
+            dzlog_warn("MOCK NETWORK: Outgoing packet dropped! (Simulated 10%% loss)");
             return segment_size;
         }
     }
