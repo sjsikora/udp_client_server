@@ -131,7 +131,7 @@ void utcp_send(int fd, const void *buf, size_t len) {
 
             // If the connection drops while we are asleep, we need to bail out
             if (tcb->state != TCP_ESTABLISHED) {
-                dzlog_error("Connection closed while blocked in utcp_send");
+                err_sys("Connection closed while blocked in utcp_send");
                 break;
             }
             continue; // Re-evaluate free space
@@ -140,9 +140,7 @@ void utcp_send(int fd, const void *buf, size_t len) {
         // Write whatever chunk we have space for
         size_t to_write = (remaining < free_space) ? remaining : free_space;
 
-        for (size_t i = 0; i < to_write; i++) {
-            tcb->send_buf[(tcb->send_buf_tail + i) % SEND_BUF_SIZE] = data_ptr[i];
-        }
+        ring_buf_write(tcb->send_buf, SEND_BUF_SIZE, tcb->send_buf_tail, data_ptr, to_write);
 
         tcb->send_buf_tail += to_write;
         data_ptr += to_write;
@@ -179,9 +177,7 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     uint32_t avaiable_bytes_to_read = tcb->recv_buf_tail - tcb->recv_buf_head;
     size_t   num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
 
-    for (size_t i = 0; i < num_bytes_to_read; i++) {
-        buf[i] = tcb->recv_buf[(tcb->recv_buf_head + i) % RECV_BUF_SIZE];
-    }
+    ring_buf_read(tcb->recv_buf, RECV_BUF_SIZE, tcb->recv_buf_head, buf, num_bytes_to_read);
 
     tcb->recv_buf_head += num_bytes_to_read;
 

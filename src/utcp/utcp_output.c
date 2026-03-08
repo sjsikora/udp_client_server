@@ -257,21 +257,9 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
 
     // Copy payload from the ring buffer based on the specific sequence number
     if (data_length > 0) {
-        uint32_t buf_offset = (seq - tcb->iss - 1) % SEND_BUF_SIZE;
+        uint32_t logical_offset = seq - tcb->iss - 1; // Minus one because of SYN
 
-        if (buf_offset + data_length <= SEND_BUF_SIZE) {
-            // Safe continuous copy
-            memcpy(seg->data, &tcb->send_buf[buf_offset], data_length);
-        } else {
-            // Buffer wraps around! Split the copy into two parts.
-            size_t part1_len = SEND_BUF_SIZE - buf_offset;
-            size_t part2_len = data_length - part1_len;
-
-            dzlog_debug("Ring buffer wrap! Copying %zu bytes from end, %zu bytes from start.", part1_len, part2_len);
-
-            memcpy(seg->data, &tcb->send_buf[buf_offset], part1_len);
-            memcpy(seg->data + part1_len, &tcb->send_buf[0], part2_len);
-        }
+        ring_buf_read(tcb->send_buf, SEND_BUF_SIZE, logical_offset, seg->data, data_length);
     }
 
     debug_print_tcp_packet(&seg->hdr, true, seg->data, data_length);

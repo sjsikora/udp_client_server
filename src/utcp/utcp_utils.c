@@ -9,6 +9,44 @@
 #include <utcp/api.h>
 #include <utcp/net/tcp.h>
 
+void ring_buf_read(const uint8_t *ring_buf, uint32_t buf_size, uint32_t offset, uint8_t *dst, size_t len) {
+    if (len == 0)
+        return;
+
+    uint32_t physical_offset = offset % buf_size;
+
+    if (physical_offset + len <= buf_size) {
+        // Contiguous read
+        memcpy(dst, &ring_buf[physical_offset], len);
+    } else {
+        // Wrap-around read
+        size_t part1_len = buf_size - physical_offset;
+        size_t part2_len = len - part1_len;
+
+        memcpy(dst, &ring_buf[physical_offset], part1_len);
+        memcpy(dst + part1_len, &ring_buf[0], part2_len);
+    }
+}
+
+void ring_buf_write(uint8_t *ring_buf, uint32_t buf_size, uint32_t offset, const uint8_t *src, size_t len) {
+    if (len == 0)
+        return;
+
+    uint32_t physical_offset = offset % buf_size;
+
+    if (physical_offset + len <= buf_size) {
+        // Contiguous write
+        memcpy(&ring_buf[physical_offset], src, len);
+    } else {
+        // Wrap-around write
+        size_t part1_len = buf_size - physical_offset;
+        size_t part2_len = len - part1_len;
+
+        memcpy(&ring_buf[physical_offset], src, part1_len);
+        memcpy(&ring_buf[0], src + part1_len, part2_len);
+    }
+}
+
 void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered, const uint8_t *payload, size_t payload_len) {
     if (!hdr)
         return;
