@@ -236,23 +236,25 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         tcb->cc_ops->cong_control(tcb, &args);
 
     } else if (ack_num == tcb->snd_una) {
+        uint32_t current_scaled_win = GET_SCALED_WIN(tcb, hdr);
+
         /**
          * Check if this packet is a pure window update packet. This packet may contain
          * no new data, no extra acknowledgment bytes, but simply to tell us the window
          * has updated.
          */
-        if (hdr->th_win > tcb->snd_wnd) {
-            dzlog_info("WINDOW UPDATE: snd_wnd increased from %u to %u", tcb->snd_wnd, hdr->th_win);
-            tcb->snd_wnd = hdr->th_win;
+        if (current_scaled_win > tcb->snd_wnd) {
+            dzlog_info("WINDOW UPDATE: snd_wnd increased from %u to %u", tcb->snd_wnd, current_scaled_win);
+            tcb->snd_wnd = current_scaled_win;
 
             // Wake up any application thread blocked in utcp_send waiting for window space
             pthread_cond_broadcast(&tcb->cond_var);
         }
 
         /* Potential Duplicate ack packet */
-        if (data_length == 0 &&             // No data was sent in the segment
-            hdr->th_win == tcb->snd_wnd &&  // Send window has not been updated
-            tcb->snd_una != tcb->snd_max) { // There is data in flight
+        else if (data_length == 0 &&                   // No data was sent in the segment
+                 current_scaled_win == tcb->snd_wnd && // Send window has not been updated
+                 tcb->snd_una != tcb->snd_max) {       // There is data in flight
 
             tcb->t_dupacks++;
             dzlog_warn("DUPLICATE ACK detected for seq %u (Count: %d). snd_max=%u", tcb->snd_una, tcb->t_dupacks,
