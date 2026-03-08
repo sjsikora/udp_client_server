@@ -32,10 +32,9 @@ void utcp_package_init(int global_udp_port) {
     dzlog_info("Initializing UTCP package on requested UDP port %d...", global_udp_port);
 
     const struct sockaddr_in addr = {
-        .sin_family = AF_INET,                     // Listen on IPv4
-        .sin_port = htons(global_udp_port),        // Listen on port UDP_PORT
-        .sin_addr.s_addr = htonl(INADDR_ANY), // Listen on localhost (localhost we can see
-                                                   // loop0 in wireshark)
+        .sin_family = AF_INET,                // Listen on IPv4
+        .sin_port = htons(global_udp_port),   // Listen on port UDP_PORT
+        .sin_addr.s_addr = htonl(INADDR_ANY), // Allow external network traffic
     };
 
     if ((udp_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)

@@ -13,8 +13,10 @@ int main() {
     utcp_package_init(0);
     int fd = utcp_socket();
 
-    struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons(8292), .sin_addr.s_addr = inet_addr("127.0.0.1")};
-    struct sockaddr_in so = {.sin_family = AF_INET, .sin_port = htons(7654), .sin_addr.s_addr = inet_addr("127.0.0.1")};
+    struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons(8292), .sin_addr.s_addr = htonl(INADDR_ANY)};
+
+    struct sockaddr_in so = {
+        .sin_family = AF_INET, .sin_port = htons(7654), .sin_addr.s_addr = inet_addr("40.82.162.155")};
 
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     utcp_connect(fd, (struct sockaddr *)&so, sizeof(so));
