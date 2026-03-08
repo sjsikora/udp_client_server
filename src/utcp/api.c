@@ -152,6 +152,7 @@ void utcp_send(int fd, const void *buf, size_t len) {
 
 int utcp_read(int fd, uint8_t *buf, size_t len) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_ESTABLISHED);
+    pthread_mutex_lock(&tcb->lock);
 
     // Spin wait for data if there is nothing to read in the buffer
     while (tcb->recv_buf_head == tcb->recv_buf_tail) {

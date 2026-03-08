@@ -11,3 +11,4 @@ log/*
 out.txt
 .DS_Store
 *.txt
+mac-laptop.pem
