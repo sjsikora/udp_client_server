@@ -206,7 +206,22 @@ int utcp_output(struct tcb *tcb) {
  * Calculates the buffer offset automatically based on the provided sequence number.
  */
 static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_t data_length) {
-    size_t              segment_size = sizeof(tcphdr) + data_length;
+    /**
+     * If we have a SYN going out, we want to let the other side know our window shift
+     * variable
+     */
+    uint8_t opt_len = 0;
+    uint8_t options[4] = {0}; // Options must be padded to a 4-byte boundary
+
+    if (flags & TH_SYN) {
+        options[0] = TCPOPT_NOP;
+        options[1] = TCPOPT_WINDOW;
+        options[2] = TCPOLEN_WINDOW;
+        options[3] = tcb->rcv_scale; // e.g., 4 (for a 2^4 = 16x multiplier)
+        opt_len = 4;
+    }
+
+    size_t              segment_size = sizeof(tcphdr) + data_length + opt_len;
     struct tcp_segment *seg = malloc(segment_size);
     if (!seg)
         return -1;
@@ -218,14 +233,27 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
     seg->hdr.th_dport = htons(tcb->dst_port);
     seg->hdr.th_seq = htonl(seq); // Use the injected sequence number
     seg->hdr.th_ack = htonl(tcb->rcv_nxt);
-    seg->hdr.th_off_flags = (sizeof(tcphdr) / 4) << 4;
     seg->hdr.th_flags = flags;
     seg->hdr.th_sum = 0;
+
+    uint8_t header_words = (sizeof(tcphdr) + opt_len) / 4;
+    seg->hdr.th_off_flags = (header_words << 4) | (flags & 0x0F);
+
+    /**
+     * We don't overwrite the data in the payload because the packets that contain
+     * SYN don't have payload data. If we were going to further expand the options
+     * variable, we would def need a more robust handling. But since we are only
+     * commuicating window size, this is good for now.
+     */
+    if (opt_len > 0) {
+        memcpy((uint8_t *)&seg->hdr + sizeof(tcphdr), options, opt_len);
+    }
 
     // Window calculations
     uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
     uint32_t current_free_space = RECV_BUF_SIZE - bytes_in_buffer;
-    seg->hdr.th_win = htons((uint16_t)current_free_space);
+
+    seg->hdr.th_win = htons(SET_SCALED_WIN(tcb, flags, current_free_space));
 
     // Copy payload from the ring buffer based on the specific sequence number
     if (data_length > 0) {

@@ -8,8 +8,8 @@
 #define TCP_H
 
 #include <netinet/in.h>
-// #include <netinet/tcp_var.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 struct tcb;
@@ -39,6 +39,11 @@ typedef struct {
     uint16_t th_sum; /* checksum */
     uint16_t th_urp; /* urgent pointer */
 } tcphdr;
+
+#define TCPOPT_EOL     0
+#define TCPOPT_NOP     1
+#define TCPOPT_WINDOW  3
+#define TCPOLEN_WINDOW 3
 
 struct tcp_segment {
     tcphdr  hdr;
@@ -220,6 +225,10 @@ struct tcb {
     uint8_t  recv_buf[RECV_BUF_SIZE];
     uint32_t recv_buf_head; // next byte to read
     uint32_t recv_buf_tail; // last received byte
+
+    uint8_t snd_scale;     /* Window scale applied to incoming th_win (peer's shift) */
+    uint8_t rcv_scale;     /* Window scale applied to outgoing th_win (our shift) */
+    bool    scale_enabled; /* Did the peer send a window scale option in their SYN? */
 
     /* Mutex locks */
     pthread_mutex_t lock;     // Protects this specific TCB

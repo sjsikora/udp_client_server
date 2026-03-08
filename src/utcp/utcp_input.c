@@ -18,6 +18,47 @@ static ssize_t     Recvfrom(void *, size_t, int, struct sockaddr *__restrict, so
 static void        deserialize_utcp_packet(uint8_t *, size_t, tcphdr **, uint8_t **, ssize_t *);
 static struct tcb *find_tcb(tcphdr *, uint32_t);
 
+/**
+ * @brief Process the window shift option in SYN packet
+ *
+ * The SYN packet may have a window shift value. If it is present, put value in snd_scale
+ * in the TCB. Code has been written for the possibility of processing more options, but only
+ * window is implemented.
+ *
+ * @note This function assumes that the hdr and the data pointer are contigous in memory
+ */
+static void process_window_option(tcphdr *hdr, struct tcb *tcb) {
+    uint8_t data_offset = (hdr->th_off_flags >> 4) * 4;
+    if (data_offset > sizeof(tcphdr)) {
+        uint8_t *opt_ptr = (uint8_t *)hdr + sizeof(tcphdr);
+        uint8_t *opt_end = (uint8_t *)hdr + data_offset;
+
+        while (opt_ptr < opt_end) {
+            if (*opt_ptr == TCPOPT_EOL)
+                break;
+            if (*opt_ptr == TCPOPT_NOP) {
+                opt_ptr++;
+                continue;
+            }
+
+            uint8_t opt_kind = opt_ptr[0];
+            uint8_t opt_len = opt_ptr[1];
+
+            if (opt_len == 0) {
+                dzlog_error("Malformed TCP option: length 0");
+                break;
+            }
+
+            if (opt_kind == TCPOPT_WINDOW && opt_len == TCPOLEN_WINDOW) {
+                tcb->snd_scale = opt_ptr[2];
+                tcb->scale_enabled = true;
+                dzlog_info("Window scaling is enabled and is %u", tcb->snd_scale);
+            }
+            opt_ptr += opt_len;
+        }
+    }
+}
+
 void *utcp_input(void *arg) {
     (void)arg;                                    // Slience compiler warning
     zlog_put_mdc("thread_name", "Listen_Thread"); // Init logging
@@ -59,12 +100,14 @@ void *utcp_input(void *arg) {
             if (hdr->th_flags & TH_SYN) {
                 dzlog_info("Received SYN from %u:%d", ntohl(from.sin_addr.s_addr), hdr->th_sport);
 
+                process_window_option(hdr, tcb);
+
                 tcb->dst_port = hdr->th_sport;
                 tcb->dst_ip = ntohl(from.sin_addr.s_addr);
                 tcb->dst_udp_port = ntohs(from.sin_port);
                 tcb->irs = hdr->th_seq;
                 tcb->rcv_nxt = tcb->irs + 1; // Increase sequence number by one
-                tcb->snd_wnd = hdr->th_win;
+                tcb->snd_wnd = GET_SCALED_WIN(tcb, hdr);
 
                 tcb->iss = 0;
                 tcb->snd_nxt = tcb->iss;
@@ -83,8 +126,10 @@ void *utcp_input(void *arg) {
                     tcb->snd_una = hdr->th_ack;     // Update new oldest unacked number
                     tcb->irs = hdr->th_seq;         // Set the server's inital recieve sequence
                     tcb->rcv_nxt = hdr->th_seq + 1; // We are now ready to recieve the (irs [or SYN bit] + 1 ) byte
-                    tcb->snd_wnd = hdr->th_win;     // The reciever may have a smaller window, update that
                     tcb->state = TCP_ESTABLISHED;
+
+                    process_window_option(hdr, tcb);
+                    tcb->snd_wnd = GET_SCALED_WIN(tcb, hdr);
 
                     // Disarm the retransmission timer
                     tcb->t_timer[TCPT_REXMT] = 0;
@@ -155,7 +200,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Slide the window over
         uint32_t old_head = tcb->send_buf_head;
         tcb->send_buf_head = tcb->send_buf_head + newly_acked_bytes;
-        tcb->snd_wnd = hdr->th_win;
+        tcb->snd_wnd = GET_SCALED_WIN(tcb, hdr);
 
         dzlog_debug("Window Update: send_buf_head %u -> %u, snd_wnd set to %u", old_head, tcb->send_buf_head,
                     tcb->snd_wnd);

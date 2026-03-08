@@ -97,6 +97,15 @@ int utcp_socket(void) {
     tcb->snd_nxt = tcb->iss;
     tcb->rcv_wnd = RECV_BUF_SIZE;
 
+    // Dynamic window scale calculation
+    uint8_t scale = 0;
+    while (RECV_BUF_SIZE >> scale > 65535 && scale < 14) {
+        scale++;
+    }
+    tcb->rcv_scale = scale;
+    tcb->scale_enabled = false;
+    tcb->snd_scale = 0;
+
     utcp_fd_table[utcp_fd] = tcb;
     pthread_mutex_unlock(&utcp_table_lock);
 

@@ -21,6 +21,22 @@
                 (tcb)->state, (tcb)->snd_una, (tcb)->snd_nxt, (tcb)->snd_max, (tcb)->snd_wnd, (tcb)->rcv_nxt,          \
                 (RECV_BUF_SIZE - ((tcb)->recv_buf_tail - (tcb)->recv_buf_head)))
 
+/**
+ * If scaling is enabled and it's not a SYN packet, shift the header window
+ * left by the scale factor. Otherwise, use the raw header window.
+ */
+#define GET_SCALED_WIN(tcb, hdr)                                                                                       \
+    (((tcb)->scale_enabled && !((hdr)->th_flags & TH_SYN)) ? ((uint32_t)(hdr)->th_win << (tcb)->snd_scale)             \
+                                                           : (uint32_t)(hdr)->th_win)
+
+/**
+ * Prepares the window value for the 16-bit header field.
+ * If scaling is confirmed, shift right.
+ * If not, clamp to 65535 to prevent overflow.
+ */
+#define SET_SCALED_WIN(tcb, flags, free_space)                                                                         \
+    ((tcb)->scale_enabled && !((flags) & TH_SYN) ? (uint16_t)((free_space) >> (tcb)->rcv_scale)                        \
+                                                 : (uint16_t)((free_space) > 65535 ? 65535 : (free_space)))
 /*
  * @brief Print out the contents of a tcp header
  */
