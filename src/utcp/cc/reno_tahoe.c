@@ -1,3 +1,4 @@
+#include "logging.h"
 #include "utcp/config.h"
 #include "utcp/net/tcp.h"
 #include "utcp/utcp_output.h"
@@ -14,6 +15,7 @@ static void cc_shared_init(struct tcb *tcb) {
     tcb->ssthresh = 0xFFFFFFFF;
     tcb->ca_state = TCP_CA_OPEN;
     dzlog_debug("CC Init: cwnd=%u, ssthresh=%u, state=OPEN", tcb->cwnd, tcb->ssthresh);
+    zlog_info(cc_logger, "INIT,%u,%u", tcb->cwnd, tcb->ssthresh);
 }
 
 /**
@@ -41,6 +43,7 @@ static void cc_shared_aimd(struct tcb *tcb, uint32_t acked) {
         tcb->cwnd += (MSS * MSS) / tcb->cwnd;
         dzlog_debug("Congestion Avoidance: cwnd %u -> %u", old_cwnd, tcb->cwnd);
     }
+    zlog_info(cc_logger, "ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
 }
 
 /**
@@ -51,6 +54,7 @@ static void cc_shared_timeout(struct tcb *tcb, uint32_t flight_size) {
     tcb->cwnd = MSS; // Hard drop to 1 MSS
     tcb->ca_state = TCP_CA_LOSS;
     dzlog_warn("Timeout: Hard drop! flight_size=%u, new ssthresh=%u, cwnd=%u", flight_size, tcb->ssthresh, tcb->cwnd);
+    zlog_info(cc_logger, "TIMEOUT,%u,%u", tcb->cwnd, tcb->ssthresh);
 }
 
 static void tahoe_cong_control(struct tcb *tcb, const struct cc_event_args *args) {
@@ -117,6 +121,7 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
 
             dzlog_warn("Reno Fast Retransmit/Recovery: flight_size=%u, ssthresh=%u, inflated cwnd=%u", flight_size,
                        tcb->ssthresh, tcb->cwnd);
+            zlog_info(cc_logger, "TRIPLE_DUP_ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
 
             // Try to retransmit that missing segment
             utcp_retransmit_segment(tcb, tcb->snd_una);
