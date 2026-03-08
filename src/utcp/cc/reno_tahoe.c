@@ -123,8 +123,12 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
                        tcb->ssthresh, tcb->cwnd);
             zlog_info(cc_logger, "TRIPLE_DUP_ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
 
-            // Try to retransmit that missing segment
-            utcp_retransmit_segment(tcb, tcb->snd_una);
+            /**
+             * Go back N behavior. Instead of sending a single, missing segment, we rewind in time back
+             * to the last unacked packet and blast the rewound window
+             */
+            tcb->snd_nxt = tcb->snd_una;
+            utcp_output(tcb);
 
         } else if (args->data.dup.total_dups > 3 && tcb->ca_state == TCP_CA_RECOVERY) {
             tcb->cwnd += MSS;
