@@ -20,6 +20,7 @@ static void        deserialize_utcp_packet(uint8_t *, size_t, tcphdr **, uint8_t
 static struct tcb *find_tcb(tcphdr *, uint32_t);
 
 void *utcp_input(void *arg) {
+    (void)arg;                                    // Slience compiler warning
     zlog_put_mdc("thread_name", "Listen_Thread"); // Init logging
 
     dzlog_info("Listen thread initialized and waiting for packets...");
