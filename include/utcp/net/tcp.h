@@ -8,7 +8,7 @@
 #define TCP_H
 
 #include <netinet/in.h>
-#include <netinet/tcp_var.h>
+// #include <netinet/tcp_var.h>
 #include <pthread.h>
 #include <stdint.h>
 

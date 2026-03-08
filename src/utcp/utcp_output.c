@@ -268,18 +268,6 @@ static int pass_to_udp(struct tcp_segment *seg, size_t segment_size, uint32_t ds
     dst_addr.sin_port = htons(dst_upd_port);
     dst_addr.sin_addr.s_addr = htonl(dst_ip);
 
-    /**
-     * Because we are commuicating over reliable localhost, we mock a unreliable
-     * network by rolling a random chance that the packet is dropped over the network.
-     */
-    if (packet_risk_drop) {
-        int result = rand_r(&random_seed);
-        if ((result % 100) < 2) { // 2% chance
-            dzlog_warn("MOCK NETWORK: Outgoing packet dropped! (Simulated 10%% loss)");
-            return segment_size;
-        }
-    }
-
     ssize_t sent_bytes = sendto(udp_fd, seg, segment_size, 0, (struct sockaddr *)&dst_addr, sizeof(dst_addr));
 
     if (sent_bytes == -1)

@@ -10,7 +10,7 @@
 int main() {
     init_zlog(0);
     int                fd = utcp_socket();
-    struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons(7654), .sin_addr.s_addr = inet_addr("127.0.0.1")};
+    struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons(7654), .sin_addr.s_addr = htonl(INADDR_ANY)};
 
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     utcp_listen(fd);

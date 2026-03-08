@@ -1,7 +1,6 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
