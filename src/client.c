@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <zlog.h>
-#define CHUNK_SIZE 614400 // 600KB chunks for reading from disk
+#define CHUNK_SIZE 65536 // 64KB chunks for reading from disk
 
 int main() {
     init_zlog(1);
