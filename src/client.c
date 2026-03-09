@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <zlog.h>
-#define CHUNK_SIZE 65536 // 64KB chunks for reading from disk
+#define CHUNK_SIZE 1048576 // 64KB chunks for reading from disk
 
 int main() {
     init_zlog(1);
@@ -21,7 +21,7 @@ int main() {
     utcp_bind(fd, (struct sockaddr *)&sa, sizeof(sa));
     utcp_connect(fd, (struct sockaddr *)&so, sizeof(so));
 
-    FILE *fptr = fopen("test_file.txt", "rb");
+    FILE *fptr = fopen("received_file.txt", "rb");
     if (!fptr)
         err_sys("Could not open test_file.txt");
 
