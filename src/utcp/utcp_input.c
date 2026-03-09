@@ -261,7 +261,11 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
                  current_scaled_win == tcb->snd_wnd && // Send window has not been updated
                  tcb->snd_una != tcb->snd_max) {       // There is data in flight
 
-            tcb->t_dupacks++;
+            // Prevent overflow
+            if (tcb->t_dupacks < 255) {
+                tcb->t_dupacks++;
+            }
+
             dzlog_warn("DUPLICATE ACK detected for seq %u (Count: %d). snd_max=%u", tcb->snd_una, tcb->t_dupacks,
                        tcb->snd_max);
 

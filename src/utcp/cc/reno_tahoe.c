@@ -109,7 +109,7 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         break;
 
     case TCP_CC_EVENT_DUP_ACK:
-        if (args->data.dup.total_dups == 3) {
+        if (args->data.dup.total_dups == 3 && tcb->ca_state != TCP_CA_LOSS) {
 
             // Calculate new threshold
             uint32_t flight_size = tcb->snd_max - tcb->snd_una;
