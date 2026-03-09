@@ -194,6 +194,11 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Update new oldest unacked number
         tcb->snd_una = ack_num;
 
+        // Prevent snd_nxt from falling behind snd_una during recovery
+        if (SEQ_GT(tcb->snd_una, tcb->snd_nxt)) {
+            tcb->snd_nxt = tcb->snd_una;
+        }
+
         // Clear dup ack counter
         tcb->t_dupacks = 0;
 

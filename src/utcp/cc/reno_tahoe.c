@@ -71,7 +71,7 @@ static void tahoe_cong_control(struct tcb *tcb, const struct cc_event_args *args
     case TCP_CC_EVENT_DUP_ACK:
         // Tahoe treats 3 dup ACKs as a hard loss (just like a timeout)
         if (args->data.dup.total_dups == 3) {
-            uint32_t flight_size = tcb->snd_nxt - tcb->snd_una;
+            uint32_t flight_size = tcb->snd_max - tcb->snd_una;
             dzlog_warn("Tahoe 3 Dup ACKs: Treating as timeout. flight_size=%u", flight_size);
 
             cc_shared_timeout(tcb, flight_size);
