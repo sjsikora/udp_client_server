@@ -118,6 +118,21 @@ int utcp_output(struct tcb *tcb) {
                     data_length = MSS;
                 }
 
+                /**
+                 * Nagle's Algorithm: suppress tiny segments when there is already
+                 * unacknowledged data in flight.  Only send a sub-MSS segment if the
+                 * pipe is completely empty (no in-flight data), which means we have
+                 * reached the tail of the send buffer.  This prevents the sender-side
+                 * silly-window syndrome where every small ACK triggers an equally small
+                 * new data segment.
+                 */
+                if (data_length > 0 && data_length < MSS && unacked_data_in_flight > 0) {
+                    dzlog_debug("Nagle: suppressing %zu-byte segment (InFlight=%u). "
+                                "Waiting for full MSS or pipe drain.",
+                                data_length, unacked_data_in_flight);
+                    data_length = 0;
+                }
+
                 if (data_length > 0) {
                     dzlog_info("Preparing to send %zu bytes of payload.", data_length);
                 }

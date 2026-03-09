@@ -39,8 +39,9 @@ static void cc_shared_aimd(struct tcb *tcb, uint32_t acked) {
         tcb->cwnd += acked;
         dzlog_debug("Slow Start: cwnd %u -> %u (ssthresh=%u)", old_cwnd, tcb->cwnd, tcb->ssthresh);
     } else {
-        // Congestion Avoidance (approx. 1 MSS per RTT)
-        tcb->cwnd += (MSS * MSS) / tcb->cwnd;
+        // Congestion Avoidance: RFC 5681 - increase proportional to bytes acked
+        // cwnd += MSS * (acked / cwnd) -> scales correctly when ACKs cover > 1 MSS
+        tcb->cwnd += (acked * MSS) / tcb->cwnd;
         dzlog_debug("Congestion Avoidance: cwnd %u -> %u", old_cwnd, tcb->cwnd);
     }
     zlog_info(cc_logger, "ACK,%u,%u", tcb->cwnd, tcb->ssthresh);

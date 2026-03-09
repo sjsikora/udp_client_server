@@ -334,7 +334,14 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             // Wake up any thread blocking in utcp_read waiting for data
             pthread_cond_broadcast(&tcb->cond_var);
 
-            if (tcb->t_flags & TF_DELACK) {
+            if (tcb->t_dupacks > 0) {
+                /* We were receiving duplicate ACKs (peer has a gap). Force immediate
+                 * ACK so the sender knows we received new data without extra delay. */
+                dzlog_debug("New data received while in dup-ACK state (%d dups). Forcing ACK.", tcb->t_dupacks);
+                tcb->t_flags &= ~TF_DELACK;
+                tcb->t_timer[TCPT_DELACK] = 0;
+                tcb->t_flags |= TF_ACKNOW;
+            } else if (tcb->t_flags & TF_DELACK) {
                 /**
                  * RFC 1122 says send every second segment
                  */
