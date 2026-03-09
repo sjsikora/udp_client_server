@@ -96,6 +96,12 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         break;
 
     case TCP_CC_EVENT_ACK:
+
+        if (tcb->ca_state == TCP_CA_LOSS) {
+            tcb->ca_state = TCP_CA_OPEN;
+            dzlog_debug("GBN Recovery successful. Congestion state reset to OPEN.");
+        }
+
         // Reno Fast Recovery Exit Logic
         if (tcb->ca_state == TCP_CA_RECOVERY) {
             tcb->cwnd = tcb->ssthresh; // Deflate the artificially inflated window
