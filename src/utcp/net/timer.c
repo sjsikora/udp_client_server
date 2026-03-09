@@ -49,7 +49,7 @@ void utcp_timers(struct tcb *tcb, int timer) {
 
         struct cc_event_args args;
         args.type = TCP_CC_EVENT_TIMEOUT;
-        args.data.timeout.flight_size = tcb->snd_max - tcb->snd_una;
+        args.data.timeout.flight_size = tcb->snd_nxt - tcb->snd_una;
 
         // Rollback the sequence pointers
         tcb->snd_nxt = tcb->snd_una;

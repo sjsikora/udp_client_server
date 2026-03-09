@@ -94,7 +94,7 @@ int utcp_output(struct tcb *tcb) {
              * It only includes payload, not the SYN bit (hence the - 1). We default to zero if we have
              * only sent the SYN bit
              */
-            uint32_t data_bytes_sent = (tcb->snd_nxt > tcb->iss) ? (tcb->snd_nxt - tcb->iss - 1) : 0;
+            uint32_t data_bytes_sent = SEQ_GT(tcb->snd_nxt, tcb->iss) ? (tcb->snd_nxt - tcb->iss - 1) : 0;
 
             /**
              * Buffered data holds the number of bytes that the user has placed in our buffer that is
@@ -179,7 +179,7 @@ int utcp_output(struct tcb *tcb) {
 
             dzlog_debug("Advancing snd_nxt by %u -> New snd_nxt=%u", consumed, tcb->snd_nxt);
 
-            if (tcb->snd_nxt > tcb->snd_max) {
+            if (SEQ_GT(tcb->snd_nxt, tcb->snd_max)) {
                 tcb->snd_max = tcb->snd_nxt;
                 dzlog_debug("Advanced snd_max to %u", tcb->snd_max);
             }
