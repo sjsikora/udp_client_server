@@ -314,9 +314,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         if (data_length <= (ssize_t)free_space) { // For every byte of data, copy into ring buffer
             uint32_t old_tail = tcb->recv_buf_tail;
 
-            for (ssize_t i = 0; i < data_length; i++) {
-                tcb->recv_buf[(tcb->recv_buf_tail + i) % RECV_BUF_SIZE] = data[i];
-            }
+            ring_buf_write(tcb->recv_buf, RECV_BUF_SIZE, tcb->recv_buf_tail, data, data_length);
 
             tcb->recv_buf_tail += data_length;
             tcb->rcv_nxt += data_length;
