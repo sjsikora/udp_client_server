@@ -334,11 +334,19 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             // Wake up any thread blocking in utcp_read waiting for data
             pthread_cond_broadcast(&tcb->cond_var);
 
-            /**
-             * Note, in the future, this should be replaced with a culmative
-             * ack timer.
-             */
-            tcb->t_flags |= TF_ACKNOW;
+            if (tcb->t_flags & TF_DELACK) {
+                /**
+                 * RFC 1122 says send every second segment
+                 */
+                dzlog_debug("Second segment received. Canceling delay and ACKing.");
+                tcb->t_flags &= ~TF_DELACK;
+                tcb->t_timer[TCPT_DELACK] = 0;
+                tcb->t_flags |= TF_ACKNOW;
+            } else {
+                dzlog_debug("First segment received. Starting delayed ACK timer.");
+                tcb->t_flags |= TF_DELACK;
+                tcb->t_timer[TCPT_DELACK] = TCPTV_DELACK;
+            }
 
         } else {
             // Buffer overflow: Usually, you'd drop the packet or truncate

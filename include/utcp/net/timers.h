@@ -30,6 +30,8 @@ struct tcb;
 #define TCP_MAXRXTSHIFT 12                /* maximum retransmits */
 #define TCPTV_KEEPCNT   8                 /* max probes before drop */
 
+#define TCPTV_DELACK MS_TO_TICKS(200) /* Delay ACK timer */
+
 // Exponential backoff multipliers for RTO and Persist timers
 extern const int tcp_backoff[];
 

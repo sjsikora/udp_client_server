@@ -84,6 +84,7 @@ enum tcp_state {
 #define TCPT_PERSIST 1 // Persist (Zero Window)
 #define TCPT_KEEP    2 // Keepalive / Connection Establishment
 #define TCPT_2MSL    3 // 2MSL / FIN_WAIT_2
+#define TCPT_DELACK  4
 
 /**
  * An enum defining what congestion control state we are in.
@@ -203,7 +204,7 @@ struct tcb {
 
     // Each entry in the t_timer array is the number of 500-ms clock
     // ticks until the timer expires.
-    short t_timer[4]; /* The four timer counters */
+    short t_timer[5]; /* The five timer counters */
 
     uint32_t t_idle; /* The number of 500ms ticks since the last segment was received on this connection*/
 

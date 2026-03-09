@@ -87,6 +87,12 @@ void utcp_timers(struct tcb *tcb, int timer) {
      */
     case TCPT_2MSL:
         break;
+    case TCPT_DELACK:
+        dzlog_debug("Delayed ACK timer expired. Forcing ACK.");
+        tcb->t_flags &= ~TF_DELACK; // Clear the delayed flag
+        tcb->t_flags |= TF_ACKNOW;  // Set the force-send flag
+        utcp_output(tcb);           // Push the ACK
+        break;
     default:
         err_sys("Unknown timer index expired");
         break;
@@ -125,7 +131,7 @@ void *utcp_slowtimo_thread(void *arg) {
             }
 
             // Decrement active timers
-            for (int timer = 0; timer < 4; timer++) {
+            for (int timer = 0; timer < 5; timer++) {
                 if (tcb->t_timer[timer] > 0) {
                     tcb->t_timer[timer]--;
 

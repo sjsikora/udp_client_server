@@ -138,11 +138,22 @@ int utcp_output(struct tcb *tcb) {
          * Don't send a packet for fun.
          *
          * If there is no data to send, we aren't sending a new SYN/FIN,
-         * and we aren't explicitly forced to send an ACK, break the loop.
+         * and we aren't explicitly forced to send an ACK or we want to delay
+         * an ACK break the loop.
          */
-        if (data_length == 0 && !sending_new_syn_fin && !force_send) {
+        if ((data_length == 0 && !sending_new_syn_fin && !force_send)) {
             dzlog_debug("Nothing to send. Breaking output loop.");
             break;
+        }
+
+        /**
+         * We are officially sending a segment. This outbound segment will automatically piggyback our latest rcv_nxt.
+         * We can safely kill any pending delayed ACK.
+         */
+        if (tcb->t_flags & TF_DELACK) {
+            dzlog_debug("Piggybacking ACK on outbound segment. Canceling delayed ACK timer.");
+            tcb->t_flags &= ~TF_DELACK;
+            tcb->t_timer[TCPT_DELACK] = 0;
         }
 
         // Send the segment
