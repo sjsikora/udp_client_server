@@ -186,11 +186,10 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
     tcb->rcv_wnd = RECV_BUF_SIZE - bytes_in_buffer;
 
-    // Silly Window Syndrome prevention. If the application is reading bytes one at a
-    // time, we don't want to be sending off an recv window update for every single byte.
-    // So, we add this condition to ensure we only send an window update if it is significant
-    // that being if the rcv_wnd is one MSS long or we were previously at 0 rcv_wnd.
-    if (tcb->rcv_wnd >= MSS || (tcb->rcv_wnd < MSS && avaiable_bytes_to_read == RECV_BUF_SIZE)) {
+    // Silly window prevention with Classic Clark's algorithm: only send window update when
+    // we can offer at least min(MSS, RECV_BUF_SIZE/2) worth of new space.
+    uint32_t sws_threshold = (MSS < RECV_BUF_SIZE / 2) ? MSS : RECV_BUF_SIZE / 2;
+    if (tcb->rcv_wnd >= sws_threshold || (tcb->rcv_wnd < sws_threshold && avaiable_bytes_to_read == RECV_BUF_SIZE)) {
         dzlog_debug("SWS triggered on fd %d: Sending window update (rcv_wnd=%u)", fd, tcb->rcv_wnd);
         tcb->t_flags |= TF_ACKNOW;
         utcp_output(tcb);
