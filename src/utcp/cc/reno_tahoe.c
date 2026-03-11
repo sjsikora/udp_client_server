@@ -39,8 +39,9 @@ static void cc_shared_aimd(struct tcb *tcb, uint32_t acked) {
         tcb->cwnd += acked;
         dzlog_debug("Slow Start: cwnd %u -> %u (ssthresh=%u)", old_cwnd, tcb->cwnd, tcb->ssthresh);
     } else {
-        // Congestion Avoidance (approx. 1 MSS per RTT)
-        tcb->cwnd += (MSS * MSS) / tcb->cwnd;
+        // Congestion Avoidance: RFC 5681 - increase proportional to bytes acked
+        // cwnd += MSS * (acked / cwnd) -> scales correctly when ACKs cover > 1 MSS
+        tcb->cwnd += (acked * MSS) / tcb->cwnd;
         dzlog_debug("Congestion Avoidance: cwnd %u -> %u", old_cwnd, tcb->cwnd);
     }
     zlog_info(cc_logger, "ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
@@ -96,6 +97,12 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         break;
 
     case TCP_CC_EVENT_ACK:
+
+        if (tcb->ca_state == TCP_CA_LOSS) {
+            tcb->ca_state = TCP_CA_OPEN;
+            dzlog_debug("GBN Recovery successful. Congestion state reset to OPEN.");
+        }
+
         // Reno Fast Recovery Exit Logic
         if (tcb->ca_state == TCP_CA_RECOVERY) {
             tcb->cwnd = tcb->ssthresh; // Deflate the artificially inflated window
@@ -109,17 +116,17 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         break;
 
     case TCP_CC_EVENT_DUP_ACK:
-        if (args->data.dup.total_dups == 3) {
+        if (args->data.dup.total_dups == 3 && tcb->ca_state != TCP_CA_LOSS) {
 
             // Calculate new threshold
             uint32_t flight_size = tcb->snd_nxt - tcb->snd_una;
             tcb->ssthresh = cc_shared_calc_ssthresh(flight_size);
 
-            // Enter Fast Recovery: Inflate window by 3 MSS for the packets that left
-            tcb->cwnd = tcb->ssthresh + (3 * MSS);
-            tcb->ca_state = TCP_CA_RECOVERY;
+            // Drop cwnd directly to ssthresh.
+            tcb->cwnd = tcb->ssthresh;
+            tcb->ca_state = TCP_CA_LOSS;
 
-            dzlog_warn("Reno Fast Retransmit/Recovery: flight_size=%u, ssthresh=%u, inflated cwnd=%u", flight_size,
+            dzlog_warn("GBN Fast Retransmit: flight_size=%u, ssthresh=%u, cwnd dropped to %u", flight_size,
                        tcb->ssthresh, tcb->cwnd);
             zlog_info(cc_logger, "TRIPLE_DUP_ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
 
@@ -128,14 +135,6 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
              * to the last unacked packet and blast the rewound window
              */
             tcb->snd_nxt = tcb->snd_una;
-            utcp_output(tcb);
-
-        } else if (args->data.dup.total_dups > 3 && tcb->ca_state == TCP_CA_RECOVERY) {
-            tcb->cwnd += MSS;
-
-            dzlog_debug("Reno Fast Recovery: duplicate ACK received, inflating cwnd to %u", tcb->cwnd);
-
-            // While in fast recovery, try to transmit more data
             utcp_output(tcb);
         }
         break;

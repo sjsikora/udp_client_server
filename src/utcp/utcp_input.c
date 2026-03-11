@@ -194,6 +194,11 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Update new oldest unacked number
         tcb->snd_una = ack_num;
 
+        // Prevent snd_nxt from falling behind snd_una during recovery
+        if (SEQ_GT(tcb->snd_una, tcb->snd_nxt)) {
+            tcb->snd_nxt = tcb->snd_una;
+        }
+
         // Clear dup ack counter
         tcb->t_dupacks = 0;
 
@@ -236,25 +241,31 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         tcb->cc_ops->cong_control(tcb, &args);
 
     } else if (ack_num == tcb->snd_una) {
+        uint32_t current_scaled_win = GET_SCALED_WIN(tcb, hdr);
+
         /**
          * Check if this packet is a pure window update packet. This packet may contain
          * no new data, no extra acknowledgment bytes, but simply to tell us the window
          * has updated.
          */
-        if (hdr->th_win > tcb->snd_wnd) {
-            dzlog_info("WINDOW UPDATE: snd_wnd increased from %u to %u", tcb->snd_wnd, hdr->th_win);
-            tcb->snd_wnd = hdr->th_win;
+        if (current_scaled_win > tcb->snd_wnd) {
+            dzlog_info("WINDOW UPDATE: snd_wnd increased from %u to %u", tcb->snd_wnd, current_scaled_win);
+            tcb->snd_wnd = current_scaled_win;
 
             // Wake up any application thread blocked in utcp_send waiting for window space
             pthread_cond_broadcast(&tcb->cond_var);
         }
 
         /* Potential Duplicate ack packet */
-        if (data_length == 0 &&             // No data was sent in the segment
-            hdr->th_win == tcb->snd_wnd &&  // Send window has not been updated
-            tcb->snd_una != tcb->snd_max) { // There is data in flight
+        else if (data_length == 0 &&                   // No data was sent in the segment
+                 current_scaled_win == tcb->snd_wnd && // Send window has not been updated
+                 tcb->snd_una != tcb->snd_max) {       // There is data in flight
 
-            tcb->t_dupacks++;
+            // Prevent overflow
+            if (tcb->t_dupacks < 255) {
+                tcb->t_dupacks++;
+            }
+
             dzlog_warn("DUPLICATE ACK detected for seq %u (Count: %d). snd_max=%u", tcb->snd_una, tcb->t_dupacks,
                        tcb->snd_max);
 
@@ -312,9 +323,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         if (data_length <= (ssize_t)free_space) { // For every byte of data, copy into ring buffer
             uint32_t old_tail = tcb->recv_buf_tail;
 
-            for (ssize_t i = 0; i < data_length; i++) {
-                tcb->recv_buf[(tcb->recv_buf_tail + i) % RECV_BUF_SIZE] = data[i];
-            }
+            ring_buf_write(tcb->recv_buf, RECV_BUF_SIZE, tcb->recv_buf_tail, data, data_length);
 
             tcb->recv_buf_tail += data_length;
             tcb->rcv_nxt += data_length;
@@ -325,11 +334,26 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             // Wake up any thread blocking in utcp_read waiting for data
             pthread_cond_broadcast(&tcb->cond_var);
 
-            /**
-             * Note, in the future, this should be replaced with a culmative
-             * ack timer.
-             */
-            tcb->t_flags |= TF_ACKNOW;
+            if (tcb->t_dupacks > 0) {
+                /* We were receiving duplicate ACKs (peer has a gap). Force immediate
+                 * ACK so the sender knows we received new data without extra delay. */
+                dzlog_debug("New data received while in dup-ACK state (%d dups). Forcing ACK.", tcb->t_dupacks);
+                tcb->t_flags &= ~TF_DELACK;
+                tcb->t_timer[TCPT_DELACK] = 0;
+                tcb->t_flags |= TF_ACKNOW;
+            } else if (tcb->t_flags & TF_DELACK) {
+                /**
+                 * RFC 1122 says send every second segment
+                 */
+                dzlog_debug("Second segment received. Canceling delay and ACKing.");
+                tcb->t_flags &= ~TF_DELACK;
+                tcb->t_timer[TCPT_DELACK] = 0;
+                tcb->t_flags |= TF_ACKNOW;
+            } else {
+                dzlog_debug("First segment received. Starting delayed ACK timer.");
+                tcb->t_flags |= TF_DELACK;
+                tcb->t_timer[TCPT_DELACK] = TCPTV_DELACK;
+            }
 
         } else {
             // Buffer overflow: Usually, you'd drop the packet or truncate

@@ -42,9 +42,18 @@
  */
 void debug_print_tcp_packet(tcphdr *hdr, bool net_ordered, const uint8_t *payload, size_t payload_len);
 
-/*
+/**
  * @brief Helper function to print out the state of a tcb
  */
 void dump_tcb(int fd);
 
+/**
+ * @brief Safely read from a circular ring buffer handling wrap-around.
+ */
+void ring_buf_read(const uint8_t *ring_buf, uint32_t buf_size, uint32_t offset, uint8_t *dst, size_t len);
+
+/**
+ * @brief Safely write to a circular ring buffer handling wrap-around.
+ */
+void ring_buf_write(uint8_t *ring_buf, uint32_t buf_size, uint32_t offset, const uint8_t *src, size_t len);
 #endif

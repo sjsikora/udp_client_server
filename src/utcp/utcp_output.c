@@ -94,7 +94,7 @@ int utcp_output(struct tcb *tcb) {
              * It only includes payload, not the SYN bit (hence the - 1). We default to zero if we have
              * only sent the SYN bit
              */
-            uint32_t data_bytes_sent = (tcb->snd_nxt > tcb->iss) ? (tcb->snd_nxt - tcb->iss - 1) : 0;
+            uint32_t data_bytes_sent = SEQ_GT(tcb->snd_nxt, tcb->iss) ? (tcb->snd_nxt - tcb->iss - 1) : 0;
 
             /**
              * Buffered data holds the number of bytes that the user has placed in our buffer that is
@@ -118,6 +118,21 @@ int utcp_output(struct tcb *tcb) {
                     data_length = MSS;
                 }
 
+                /**
+                 * Nagle's Algorithm: suppress tiny segments when there is already
+                 * unacknowledged data in flight.  Only send a sub-MSS segment if the
+                 * pipe is completely empty (no in-flight data), which means we have
+                 * reached the tail of the send buffer.  This prevents the sender-side
+                 * silly-window syndrome where every small ACK triggers an equally small
+                 * new data segment.
+                 */
+                if (data_length > 0 && data_length < MSS && unacked_data_in_flight > 0) {
+                    dzlog_debug("Nagle: suppressing %zu-byte segment (InFlight=%u). "
+                                "Waiting for full MSS or pipe drain.",
+                                data_length, unacked_data_in_flight);
+                    data_length = 0;
+                }
+
                 if (data_length > 0) {
                     dzlog_info("Preparing to send %zu bytes of payload.", data_length);
                 }
@@ -138,11 +153,22 @@ int utcp_output(struct tcb *tcb) {
          * Don't send a packet for fun.
          *
          * If there is no data to send, we aren't sending a new SYN/FIN,
-         * and we aren't explicitly forced to send an ACK, break the loop.
+         * and we aren't explicitly forced to send an ACK or we want to delay
+         * an ACK break the loop.
          */
-        if (data_length == 0 && !sending_new_syn_fin && !force_send) {
+        if ((data_length == 0 && !sending_new_syn_fin && !force_send)) {
             dzlog_debug("Nothing to send. Breaking output loop.");
             break;
+        }
+
+        /**
+         * We are officially sending a segment. This outbound segment will automatically piggyback our latest rcv_nxt.
+         * We can safely kill any pending delayed ACK.
+         */
+        if (tcb->t_flags & TF_DELACK) {
+            dzlog_debug("Piggybacking ACK on outbound segment. Canceling delayed ACK timer.");
+            tcb->t_flags &= ~TF_DELACK;
+            tcb->t_timer[TCPT_DELACK] = 0;
         }
 
         // Send the segment
@@ -179,7 +205,7 @@ int utcp_output(struct tcb *tcb) {
 
             dzlog_debug("Advancing snd_nxt by %u -> New snd_nxt=%u", consumed, tcb->snd_nxt);
 
-            if (tcb->snd_nxt > tcb->snd_max) {
+            if (SEQ_GT(tcb->snd_nxt, tcb->snd_max)) {
                 tcb->snd_max = tcb->snd_nxt;
                 dzlog_debug("Advanced snd_max to %u", tcb->snd_max);
             }
@@ -257,21 +283,9 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
 
     // Copy payload from the ring buffer based on the specific sequence number
     if (data_length > 0) {
-        uint32_t buf_offset = (seq - tcb->iss - 1) % SEND_BUF_SIZE;
+        uint32_t logical_offset = seq - tcb->iss - 1; // Minus one because of SYN
 
-        if (buf_offset + data_length <= SEND_BUF_SIZE) {
-            // Safe continuous copy
-            memcpy(seg->data, &tcb->send_buf[buf_offset], data_length);
-        } else {
-            // Buffer wraps around! Split the copy into two parts.
-            size_t part1_len = SEND_BUF_SIZE - buf_offset;
-            size_t part2_len = data_length - part1_len;
-
-            dzlog_debug("Ring buffer wrap! Copying %zu bytes from end, %zu bytes from start.", part1_len, part2_len);
-
-            memcpy(seg->data, &tcb->send_buf[buf_offset], part1_len);
-            memcpy(seg->data + part1_len, &tcb->send_buf[0], part2_len);
-        }
+        ring_buf_read(tcb->send_buf, SEND_BUF_SIZE, logical_offset, seg->data, data_length);
     }
 
     debug_print_tcp_packet(&seg->hdr, true, seg->data, data_length);

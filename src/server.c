@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <utcp/api.h>
 #include <zlog.h>
-#define TARGET_SIZE (10 * 1024 * 1024)
+#define TARGET_SIZE 1000000000 
 
 int main() {
     init_zlog(0);

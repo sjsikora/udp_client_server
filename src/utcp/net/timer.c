@@ -49,7 +49,7 @@ void utcp_timers(struct tcb *tcb, int timer) {
 
         struct cc_event_args args;
         args.type = TCP_CC_EVENT_TIMEOUT;
-        args.data.timeout.flight_size = tcb->snd_max - tcb->snd_una;
+        args.data.timeout.flight_size = tcb->snd_nxt - tcb->snd_una;
 
         // Rollback the sequence pointers
         tcb->snd_nxt = tcb->snd_una;
@@ -86,6 +86,12 @@ void utcp_timers(struct tcb *tcb, int timer) {
      * Fired during connection teardown to ensure old packets die.
      */
     case TCPT_2MSL:
+        break;
+    case TCPT_DELACK:
+        dzlog_debug("Delayed ACK timer expired. Forcing ACK.");
+        tcb->t_flags &= ~TF_DELACK; // Clear the delayed flag
+        tcb->t_flags |= TF_ACKNOW;  // Set the force-send flag
+        utcp_output(tcb);           // Push the ACK
         break;
     default:
         err_sys("Unknown timer index expired");
@@ -125,7 +131,7 @@ void *utcp_slowtimo_thread(void *arg) {
             }
 
             // Decrement active timers
-            for (int timer = 0; timer < 4; timer++) {
+            for (int timer = 0; timer < 5; timer++) {
                 if (tcb->t_timer[timer] > 0) {
                     tcb->t_timer[timer]--;
 

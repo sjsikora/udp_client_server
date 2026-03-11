@@ -3,8 +3,8 @@
  * should be indifferent to the UTCP system
  */
 #include <ctype.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #ifndef UTILS_H
 #define UTILS_H

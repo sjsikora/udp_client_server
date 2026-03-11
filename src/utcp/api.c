@@ -131,7 +131,7 @@ void utcp_send(int fd, const void *buf, size_t len) {
 
             // If the connection drops while we are asleep, we need to bail out
             if (tcb->state != TCP_ESTABLISHED) {
-                dzlog_error("Connection closed while blocked in utcp_send");
+                err_sys("Connection closed while blocked in utcp_send");
                 break;
             }
             continue; // Re-evaluate free space
@@ -140,9 +140,7 @@ void utcp_send(int fd, const void *buf, size_t len) {
         // Write whatever chunk we have space for
         size_t to_write = (remaining < free_space) ? remaining : free_space;
 
-        for (size_t i = 0; i < to_write; i++) {
-            tcb->send_buf[(tcb->send_buf_tail + i) % SEND_BUF_SIZE] = data_ptr[i];
-        }
+        ring_buf_write(tcb->send_buf, SEND_BUF_SIZE, tcb->send_buf_tail, data_ptr, to_write);
 
         tcb->send_buf_tail += to_write;
         data_ptr += to_write;
@@ -179,9 +177,7 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     uint32_t avaiable_bytes_to_read = tcb->recv_buf_tail - tcb->recv_buf_head;
     size_t   num_bytes_to_read = (len < (size_t)avaiable_bytes_to_read) ? len : (size_t)avaiable_bytes_to_read;
 
-    for (size_t i = 0; i < num_bytes_to_read; i++) {
-        buf[i] = tcb->recv_buf[(tcb->recv_buf_head + i) % RECV_BUF_SIZE];
-    }
+    ring_buf_read(tcb->recv_buf, RECV_BUF_SIZE, tcb->recv_buf_head, buf, num_bytes_to_read);
 
     tcb->recv_buf_head += num_bytes_to_read;
 
@@ -190,11 +186,10 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
     uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
     tcb->rcv_wnd = RECV_BUF_SIZE - bytes_in_buffer;
 
-    // Silly Window Syndrome prevention. If the application is reading bytes one at a
-    // time, we don't want to be sending off an recv window update for every single byte.
-    // So, we add this condition to ensure we only send an window update if it is significant
-    // that being if the rcv_wnd is one MSS long or we were previously at 0 rcv_wnd.
-    if (tcb->rcv_wnd >= MSS || (tcb->rcv_wnd < MSS && avaiable_bytes_to_read == RECV_BUF_SIZE)) {
+    // Silly window prevention with Classic Clark's algorithm: only send window update when
+    // we can offer at least min(MSS, RECV_BUF_SIZE/2) worth of new space.
+    uint32_t sws_threshold = (MSS < RECV_BUF_SIZE / 2) ? MSS : RECV_BUF_SIZE / 2;
+    if (tcb->rcv_wnd >= sws_threshold || (tcb->rcv_wnd < sws_threshold && avaiable_bytes_to_read == RECV_BUF_SIZE)) {
         dzlog_debug("SWS triggered on fd %d: Sending window update (rcv_wnd=%u)", fd, tcb->rcv_wnd);
         tcb->t_flags |= TF_ACKNOW;
         utcp_output(tcb);
