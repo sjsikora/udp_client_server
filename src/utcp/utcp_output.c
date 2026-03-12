@@ -275,9 +275,11 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
         memcpy((uint8_t *)&seg->hdr + sizeof(tcphdr), options, opt_len);
     }
 
-    // Window calculations
-    uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
-    uint32_t current_free_space = RECV_BUF_SIZE - bytes_in_buffer;
+    /* Window calculations.
+     * Subtract ooo_bytes so the sender cannot fill space that is already
+     * reserved by buffered out-of-order segments waiting to drain. */
+    uint32_t bytes_in_buffer    = tcb->recv_buf_tail - tcb->recv_buf_head;
+    uint32_t current_free_space = RECV_BUF_SIZE - bytes_in_buffer - tcb->ooo_bytes;
 
     seg->hdr.th_win = htons(SET_SCALED_WIN(tcb, flags, current_free_space));
 

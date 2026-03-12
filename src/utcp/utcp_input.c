@@ -14,6 +14,8 @@
 #include <zlog.h>
 
 static void        handle_received_data(struct tcb *, tcphdr *, uint8_t *, ssize_t);
+static void        insert_ooo_segment(struct tcb *, uint32_t, uint8_t *, uint32_t);
+static void        drain_ooo_queue(struct tcb *);
 static ssize_t     Recvfrom(void *, size_t, int, struct sockaddr *__restrict, socklen_t *__restrict);
 static void        deserialize_utcp_packet(uint8_t *, size_t, tcphdr **, uint8_t **, ssize_t *);
 static struct tcb *find_tcb(tcphdr *, uint32_t);
@@ -179,6 +181,173 @@ void *utcp_input(void *arg) {
     return NULL;
 }
 
+/**
+ * @brief Insert an out-of-order segment into the TCB's reassembly queue.
+ *
+ * The queue is kept sorted in ascending sequence-number order.  Overlapping
+ * and duplicate bytes are trimmed so the queue never holds redundant data.
+ * ooo_bytes counts against the effective receive window to prevent the sender
+ * from overrunning the buffer.
+ *
+ * Follows the BSD 4.4 TCP reassembly approach (sys/netinet/tcp_input.c).
+ *
+ * @note Called with TCB lock held.
+ */
+static void insert_ooo_segment(struct tcb *tcb, uint32_t seq, uint8_t *data, uint32_t len) {
+    /* Available space: what isn't already used by in-order or OOO bytes */
+    uint32_t buf_used  = tcb->recv_buf_tail - tcb->recv_buf_head;
+    uint32_t available = RECV_BUF_SIZE - buf_used - tcb->ooo_bytes;
+
+    if (len > available) {
+        dzlog_warn("OOO DROP (OOM): No buffer space. buf_used=%u ooo_bytes=%u incoming=%u",
+                   buf_used, tcb->ooo_bytes, len);
+        return;
+    }
+
+    uint32_t end_seq = seq + len; /* exclusive end of incoming segment */
+
+    /* Walk to the insertion point: skip entries that end before our segment starts */
+    struct tcpq_entry *prev = NULL;
+    struct tcpq_entry *cur  = tcb->ooo_head;
+
+    while (cur != NULL && SEQ_LEQ(cur->seq + cur->len, seq)) {
+        prev = cur;
+        cur  = cur->next;
+    }
+
+    /* Trim start: the tail of the previous entry may overlap our new segment */
+    if (prev != NULL) {
+        uint32_t prev_end = prev->seq + prev->len;
+        if (SEQ_GT(prev_end, seq)) {
+            uint32_t overlap = prev_end - seq;
+            if (overlap >= len) {
+                dzlog_debug("OOO: seg [%u,%u) fully covered by existing entry. Discarding.", seq, end_seq);
+                return;
+            }
+            data    += overlap;
+            len     -= overlap;
+            seq      = prev_end;
+            end_seq  = seq + len;
+        }
+    }
+
+    /* Allocate new queue entry */
+    struct tcpq_entry *entry = malloc(sizeof(struct tcpq_entry));
+    if (!entry) {
+        dzlog_error("OOO: malloc failed for tcpq_entry");
+        return;
+    }
+    entry->data = malloc(len);
+    if (!entry->data) {
+        free(entry);
+        dzlog_error("OOO: malloc failed for OOO data buffer");
+        return;
+    }
+    memcpy(entry->data, data, len);
+    entry->seq  = seq;
+    entry->len  = len;
+    entry->next = NULL;
+
+    /* Absorb or trim any following entries that our new segment overlaps */
+    while (cur != NULL && SEQ_LT(cur->seq, end_seq)) {
+        uint32_t cur_end = cur->seq + cur->len;
+        if (SEQ_LEQ(cur_end, end_seq)) {
+            /* cur is fully covered — remove it */
+            struct tcpq_entry *next = cur->next;
+            tcb->ooo_bytes -= cur->len;
+            free(cur->data);
+            free(cur);
+            cur = next;
+        } else {
+            /* cur partially overlaps — trim its front */
+            uint32_t overlap = end_seq - cur->seq;
+            memmove(cur->data, cur->data + overlap, cur->len - overlap);
+            tcb->ooo_bytes -= overlap;
+            cur->seq       += overlap;
+            cur->len       -= overlap;
+            break;
+        }
+    }
+
+    /* Link the new entry into the sorted list */
+    entry->next = cur;
+    if (prev == NULL) {
+        tcb->ooo_head = entry;
+    } else {
+        prev->next = entry;
+    }
+    tcb->ooo_bytes += len;
+
+    dzlog_info("OOO BUFFERED: seg [%u, %u). ooo_bytes now %u", seq, end_seq, tcb->ooo_bytes);
+}
+
+/**
+ * @brief Drain consecutive entries from the OOO queue into the receive buffer.
+ *
+ * Called after an in-order segment is accepted.  If the head of the OOO queue
+ * now begins exactly at rcv_nxt, that data is contiguous and can be moved into
+ * recv_buf.  We repeat until the queue is empty or a gap remains, advancing
+ * rcv_nxt cumulatively (i.e. a single cumulative ACK covers all drained data).
+ *
+ * @note Called with TCB lock held.
+ */
+static void drain_ooo_queue(struct tcb *tcb) {
+    while (tcb->ooo_head != NULL) {
+        struct tcpq_entry *entry     = tcb->ooo_head;
+        uint32_t           entry_end = entry->seq + entry->len;
+
+        /* Case 1: Fully redundant — the entire entry falls below rcv_nxt.
+         * This can happen when a large in-order segment overlaps data that
+         * was already sitting in the OOO queue. Discard and keep scanning;
+         * the next entry may still be useful. */
+        if (SEQ_LEQ(entry_end, tcb->rcv_nxt)) {
+            dzlog_warn("OOO DRAIN: Discarding fully redundant entry [%u, %u) (rcv_nxt=%u).",
+                       entry->seq, entry_end, tcb->rcv_nxt);
+            tcb->ooo_bytes -= entry->len;
+            tcb->ooo_head   = entry->next;
+            free(entry->data);
+            free(entry);
+            continue;
+        }
+
+        /* Case 2: Partial overlap — the entry starts before rcv_nxt but
+         * extends past it.  Trim the already-received prefix in place so
+         * the entry aligns exactly with rcv_nxt, then fall through. */
+        if (SEQ_LT(entry->seq, tcb->rcv_nxt)) {
+            uint32_t trim = tcb->rcv_nxt - entry->seq;
+            dzlog_warn("OOO DRAIN: Trimming %u redundant bytes from entry [%u, %u) (rcv_nxt=%u).",
+                       trim, entry->seq, entry_end, tcb->rcv_nxt);
+            memmove(entry->data, entry->data + trim, entry->len - trim);
+            tcb->ooo_bytes -= trim;
+            entry->seq     += trim;
+            entry->len     -= trim;
+            /* entry->seq == rcv_nxt after trim; fall through to Case 3 */
+        }
+
+        /* Case 3: Entry starts exactly at rcv_nxt — drain it into recv_buf */
+        if (entry->seq != tcb->rcv_nxt) {
+            break; /* Gap still exists; nothing more to drain */
+        }
+
+        uint32_t free_space = RECV_BUF_SIZE - (tcb->recv_buf_tail - tcb->recv_buf_head);
+        if (entry->len > free_space) {
+            dzlog_error("OOO DRAIN: recv_buf full during drain! entry->len=%u free=%u", entry->len, free_space);
+            break;
+        }
+
+        ring_buf_write(tcb->recv_buf, RECV_BUF_SIZE, tcb->recv_buf_tail, entry->data, entry->len);
+        tcb->recv_buf_tail += entry->len;
+        tcb->rcv_nxt       += entry->len;
+        tcb->ooo_bytes     -= entry->len;
+
+        tcb->ooo_head = entry->next;
+        free(entry->data);
+        free(entry);
+
+        dzlog_info("OOO DRAIN: entry consumed, rcv_nxt=%u ooo_bytes=%u", tcb->rcv_nxt, tcb->ooo_bytes);
+    }
+}
+
 static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ssize_t data_length) {
     /* Handle Acknowledgement */
     uint32_t ack_num = hdr->th_ack;
@@ -316,9 +485,11 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
     if (seq_num == tcb->rcv_nxt) { // Is this the packet we are expecting?
 
-        // See how much room we have left in the buffer
-        uint32_t free_space = RECV_BUF_SIZE - (tcb->recv_buf_tail - tcb->recv_buf_head);
-        dzlog_debug("Buffer Check: free_space=%u, incoming_data=%zd", free_space, data_length);
+        /* Available space must reserve room for OOO bytes that will eventually
+         * drain into recv_buf, so subtract ooo_bytes from the total. */
+        uint32_t free_space = RECV_BUF_SIZE - (tcb->recv_buf_tail - tcb->recv_buf_head) - tcb->ooo_bytes;
+        dzlog_debug("Buffer Check: free_space=%u (ooo_bytes=%u), incoming_data=%zd",
+                    free_space, tcb->ooo_bytes, data_length);
 
         if (data_length <= (ssize_t)free_space) { // For every byte of data, copy into ring buffer
             uint32_t old_tail = tcb->recv_buf_tail;
@@ -333,6 +504,18 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
             // Wake up any thread blocking in utcp_read waiting for data
             pthread_cond_broadcast(&tcb->cond_var);
+
+            /* Drain any OOO segments that are now consecutive with rcv_nxt.
+             * This advances rcv_nxt cumulatively — a single ACK will cover
+             * all the data moved out of the reassembly queue. */
+            uint32_t pre_drain_rcv_nxt = tcb->rcv_nxt;
+            drain_ooo_queue(tcb);
+            if (tcb->rcv_nxt != pre_drain_rcv_nxt) {
+                dzlog_info("OOO DRAIN: rcv_nxt advanced %u -> %u after hole filled.",
+                           pre_drain_rcv_nxt, tcb->rcv_nxt);
+                /* Wake readers again — more data is now available */
+                pthread_cond_broadcast(&tcb->cond_var);
+            }
 
             if (tcb->t_dupacks > 0) {
                 /* We were receiving duplicate ACKs (peer has a gap). Force immediate
@@ -362,7 +545,13 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
             return;
         }
     } else {
-        dzlog_warn("OUT OF ORDER: Expected %u, got %u. Dropping payload and forcing ACK.", tcb->rcv_nxt, seq_num);
+        /* seq_num > rcv_nxt: out-of-order segment.
+         * Buffer it in the reassembly queue and send a duplicate ACK of
+         * the last in-order byte (rcv_nxt) so the sender knows what we
+         * are still waiting for.  The application cannot read past the
+         * hole because recv_buf only contains contiguous in-order data. */
+        dzlog_warn("OUT OF ORDER: Expected %u, got %u. Buffering and sending dup ACK.", tcb->rcv_nxt, seq_num);
+        insert_ooo_segment(tcb, seq_num, data, (uint32_t)data_length);
         tcb->t_flags |= TF_ACKNOW;
     }
 
