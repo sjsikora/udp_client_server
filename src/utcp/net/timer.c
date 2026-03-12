@@ -42,7 +42,7 @@ void utcp_timers(struct tcb *tcb, int timer) {
         int base_rto = tcb->t_rxtcur > 0 ? tcb->t_rxtcur : TCPTV_SRTTDFLT;
         int new_timer = base_rto * backoff_multiplier;
 
-        // Don't go over 128 or 64 seconds
+        // Don't go over 64 seconds
         if (new_timer > TCPTV_REXMTMAX)
             new_timer = TCPTV_REXMTMAX;
         tcb->t_timer[TCPT_REXMT] = new_timer;
@@ -52,14 +52,20 @@ void utcp_timers(struct tcb *tcb, int timer) {
         args.data.timeout.flight_size = tcb->snd_nxt - tcb->snd_una;
 
         // Rollback the sequence pointers
+        uint32_t pre_rollback_snd_nxt = tcb->snd_nxt;
         tcb->snd_nxt = tcb->snd_una;
 
-        dzlog_warn("RTO Expired! Retransmitting sequence %u, flight_size=%u, backoff_shift=%d", tcb->snd_nxt,
-                   args.data.timeout.flight_size, tcb->t_rxtshift);
+        dzlog_warn("REXMT: Timeout #%d fired! "
+                   "base_rto=%d ticks (%d ms) x backoff=%d -> new_timer=%d ticks (%d ms). "
+                   "flight_size=%u bytes. snd_nxt rolled back: %u -> %u (snd_una).",
+                   tcb->t_rxtshift, base_rto, base_rto * TCP_TICK_MS, backoff_multiplier, new_timer,
+                   new_timer * TCP_TICK_MS, args.data.timeout.flight_size, pre_rollback_snd_nxt, tcb->snd_nxt);
 
         /**
-         * Reset the RTT timer. If not, when a packet was dropped and an ACK eventually arrives, our RTT timer will
-         * not realize the ACK is for the second attempt and not the first. AKA Karn's Algorithm.
+         * Karn's Algorithm: reset the RTT measurement. If not reset, when the
+         * retransmitted packet is ACKed we cannot tell whether the ACK is for
+         * the original or the retransmitted copy, so the sample would be
+         * ambiguous and must not be used to update SRTT/RTTVAR.
          */
         tcb->t_rtt = 0;
 
@@ -169,40 +175,69 @@ void *utcp_slowtimo_thread(void *arg) {
 }
 
 void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks) {
+    uint32_t old_srtt_ticks = tcb->t_srtt >> 3;
+    uint32_t old_rttvar_ticks = tcb->t_rttvar >> 2;
+    uint32_t old_rxtcur = tcb->t_rxtcur;
+
     if (tcb->t_srtt == 0) {
         /**
-         * We have no previous measurement. Therefore we calculate with:
-         * First measurement: RTO = RTT + 4 * (RTT / 2)
+         * First measurement ever.
+         * RFC 6298 §2.2: SRTT <- R, RTTVAR <- R/2, RTO <- SRTT + 4*RTTVAR = 3*R.
+         *
+         * Fixed-point representation:
+         *   t_srtt   is SRTT * 8   → rtt_ticks << 3
+         *   t_rttvar is RTTVAR * 4 → (rtt_ticks/2) * 4 = rtt_ticks * 2 = rtt_ticks << 1
          */
-        tcb->t_srtt = rtt_ticks << 3;   // Store SRTT scaled by 8
-        tcb->t_rttvar = rtt_ticks << 1; // Store RTTVAR scaled by 4 (RTTVAR = RTT/2)
+        tcb->t_srtt = rtt_ticks << 3;
+        tcb->t_rttvar = rtt_ticks << 1;
+        dzlog_info("RTT [xmit_timer]: First measurement: R=%d ticks (%d ms). "
+                   "Initialising SRTT=%d ticks (%d ms), RTTVAR=%d ticks (%d ms).",
+                   rtt_ticks, rtt_ticks * TCP_TICK_MS, tcb->t_srtt >> 3, (tcb->t_srtt >> 3) * TCP_TICK_MS,
+                   tcb->t_rttvar >> 2, (tcb->t_rttvar >> 2) * TCP_TICK_MS);
     } else {
         /**
-         * The following measurements are caclulated with the aplha, beta
-         * learned in COSC 328. In other words, it is the Jacobson/Karels Algorithium.
+         * Subsequent measurements — Jacobson/Karels algorithm (RFC 6298 §2.3).
+         *
+         *   delta  = R' - SRTT_real         (error between new sample and estimate)
+         *   SRTT   = SRTT + (1/8) * delta   (exponential weighted moving average, α=1/8)
+         *   RTTVAR = RTTVAR + (1/4)*(|delta| - RTTVAR)  (variance estimate, β=1/4)
+         *
+         * In fixed-point (t_srtt scaled ×8, t_rttvar scaled ×4):
+         *   t_srtt  += delta              (delta cancels the ×8 scale)
+         *   t_rttvar += |delta| - (t_rttvar >> 2)
          */
-        // delta = R' - (SRTT / 8)
-        int delta = rtt_ticks - (tcb->t_srtt >> 3);
+        int delta = rtt_ticks - (int)(tcb->t_srtt >> 3);
 
-        // SRTT = SRTT + alpha * delta (alpha is 1/8)
-        tcb->t_srtt += delta;
+        tcb->t_srtt += delta; /* SRTT ← SRTT + (1/8)·delta  (scaled ×8) */
 
-        // RTTVAR = RTTVAR + beta * (|delta| - RTTVAR) (beta is 1/4)
         if (delta < 0)
-            delta = -delta;
-        delta -= (tcb->t_rttvar >> 2);
-        tcb->t_rttvar += delta;
+            delta = -delta;                 /* |delta| */
+        delta -= (int)(tcb->t_rttvar >> 2); /* |delta| − RTTVAR_real */
+        tcb->t_rttvar += delta;             /* RTTVAR ← RTTVAR + (1/4)·(|delta|−RTTVAR) */
+
+        dzlog_debug("RTT [xmit_timer]: R=%d ticks (%d ms), delta=%+d ticks.", rtt_ticks, rtt_ticks * TCP_TICK_MS,
+                    rtt_ticks - (int)old_srtt_ticks);
     }
 
-    // RTO = SRTT + 4 * RTTVAR
+    // RTO = SRTT + 4 * RTTVAR  (using scaled fields: (t_srtt>>3) + t_rttvar)
     tcb->t_rxtcur = (tcb->t_srtt >> 3) + tcb->t_rttvar;
 
-    // Bound the RTO to minimum and maximum values defined in your constants
+    // Enforce RFC 6298 minimum (200 ms) and implementation maximum (64 s).
     if (tcb->t_rxtcur < TCPTV_MIN) {
+        dzlog_debug("RTT [xmit_timer]: RTO %u ticks clamped up to TCPTV_MIN=%d ticks.", tcb->t_rxtcur, TCPTV_MIN);
         tcb->t_rxtcur = TCPTV_MIN;
     } else if (tcb->t_rxtcur > TCPTV_REXMTMAX) {
+        dzlog_debug("RTT [xmit_timer]: RTO %u ticks clamped down to TCPTV_REXMTMAX=%d ticks.", tcb->t_rxtcur,
+                    TCPTV_REXMTMAX);
         tcb->t_rxtcur = TCPTV_REXMTMAX;
     }
 
-    dzlog_debug("RTT Update: Measured=%d ticks, SRTT=%d, RTO=%d", rtt_ticks, tcb->t_srtt >> 3, tcb->t_rxtcur);
+    dzlog_info("RTT [xmit_timer]: measured=%d ticks (%d ms) | "
+               "srtt: %u→%u ticks (%u→%u ms) | "
+               "rttvar: %u→%u ticks (%u→%u ms) | "
+               "rxtcur: %u→%u ticks (%u→%u ms)",
+               rtt_ticks, rtt_ticks * TCP_TICK_MS, old_srtt_ticks, tcb->t_srtt >> 3, old_srtt_ticks * TCP_TICK_MS,
+               (tcb->t_srtt >> 3) * TCP_TICK_MS, old_rttvar_ticks, tcb->t_rttvar >> 2, old_rttvar_ticks * TCP_TICK_MS,
+               (tcb->t_rttvar >> 2) * TCP_TICK_MS, old_rxtcur, tcb->t_rxtcur, old_rxtcur * TCP_TICK_MS,
+               tcb->t_rxtcur * TCP_TICK_MS);
 }

@@ -382,25 +382,54 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Wake up any thread blocked in utcp_send waiting for a buffer
         pthread_cond_broadcast(&tcb->cond_var);
 
-        // If we were tracking a segment and this ACK acknowledges it then stop the timer.
+        // If we were tracking a segment and this ACK acknowledges it, complete the measurement.
         if (tcb->t_rtt != 0 && SEQ_GT(ack_num, tcb->t_rtseq)) {
-            dzlog_debug("RTT Segment ACKed (seq %u). Stopping timer and updating RTO.", tcb->t_rtseq);
-            // Subtract 1 because we initialized t_rtt to 1 in utcp_output
-            utcp_xmit_timer(tcb, tcb->t_rtt - 1);
+            /* Subtract 1 because t_rtt was initialised to 1 (not 0) in utcp_output,
+             * so the true elapsed ticks = t_rtt - 1. */
+            int measured_rtt = (int)tcb->t_rtt - 1;
+            dzlog_info("RTT: ACK %u covers tracked seq=%u | measured=%d ticks (%d ms) | "
+                       "old srtt=%u ticks (%u ms) old rxtcur=%d ticks (%d ms)",
+                       ack_num, tcb->t_rtseq, measured_rtt, measured_rtt * TCP_TICK_MS, tcb->t_srtt >> 3,
+                       (tcb->t_srtt >> 3) * TCP_TICK_MS, tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
 
-            tcb->t_rtt = 0;      // Clear so we can time a new segment
-            tcb->t_rxtshift = 0; // Reset the exponential backoff shift on a successful ACK
+            utcp_xmit_timer(tcb, measured_rtt);
+
+            dzlog_info("RTT: After update | srtt=%u ticks (%u ms) rttvar=%u ticks (%u ms) "
+                       "rxtcur=%d ticks (%d ms)",
+                       tcb->t_srtt >> 3, (tcb->t_srtt >> 3) * TCP_TICK_MS, tcb->t_rttvar >> 2,
+                       (tcb->t_rttvar >> 2) * TCP_TICK_MS, tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
+
+            tcb->t_rtt = 0;      /* clear so we can time a new segment          */
+            tcb->t_rxtshift = 0; /* successful ACK: reset exponential-backoff    */
         }
 
-        // Retransmission timer
-        // If this ACK acknowledges EVERYTHING we have sent, turn off the timer
+        // Retransmission timer management.
         if (tcb->snd_una == tcb->snd_max) {
-            dzlog_debug("All flight data ACKed. Disarming REXMT timer.");
+            dzlog_info("REXMT: All data ACKed (snd_una=snd_max=%u). Disarming timer.", tcb->snd_una);
             tcb->t_timer[TCPT_REXMT] = 0;
         } else {
-            // There is still data in flight. Restart the timer for the next segment.
-            dzlog_debug("Data still in flight. Restarting REXMT timer to %d ticks.", tcb->t_rxtcur);
-            tcb->t_timer[TCPT_REXMT] = tcb->t_rxtcur;
+            /*
+             * Data is still in-flight. Rearm the timer.
+             *
+             * Bug fix: if retransmission timeouts have occurred (t_rxtshift > 0),
+             * Karn's algorithm prevents us from getting a fresh RTT measurement,
+             * so t_rxtshift stays elevated.  We must rearm with the backed-off RTO
+             * (rxtcur * backoff[rxtshift]) to avoid firing the timer far too soon
+             * and triggering unnecessary retransmissions during recovery.
+             */
+            int rearm_ticks = tcb->t_rxtcur;
+            int backoff = 1;
+            if (tcb->t_rxtshift > 0) {
+                backoff = tcp_backoff[tcb->t_rxtshift];
+                rearm_ticks = tcb->t_rxtcur * backoff;
+                if (rearm_ticks > TCPTV_REXMTMAX)
+                    rearm_ticks = TCPTV_REXMTMAX;
+            }
+            dzlog_info("REXMT: Data still in flight (%u bytes). Restarting timer to %d ticks (%d ms) "
+                       "[rxtcur=%d rxtshift=%d backoff=%d].",
+                       tcb->snd_max - tcb->snd_una, rearm_ticks, rearm_ticks * TCP_TICK_MS, tcb->t_rxtcur,
+                       tcb->t_rxtshift, backoff);
+            tcb->t_timer[TCPT_REXMT] = rearm_ticks;
         }
 
         struct cc_event_args args;
@@ -426,7 +455,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         }
 
         /* Potential Duplicate ack packet */
-        else if (data_length == 0 &&                  // No data was sent in the segment
+        else if (data_length == 0 &&                   // No data was sent in the segment
                  current_scaled_win <= tcb->snd_wnd && // Send window did not grow (shrink counts too)
                  tcb->snd_una != tcb->snd_max) {       // There is data in flight
 
