@@ -1,3 +1,4 @@
+#include "utcp/cc/new_reno.h"
 #include "utcp/cc/reno.h"
 #include "utcp/cc/tahoe.h"
 #include "utcp/net/timers.h"
@@ -87,7 +88,8 @@ int utcp_socket(void) {
     pthread_cond_init(&tcb->cond_var, NULL);
 
     // tcb->cc_ops = &utcp_tahoe;
-    tcb->cc_ops = &utcp_reno;
+    // tcb->cc_ops = &utcp_reno;
+    tcb->cc_ops = &utcp_new_reno;
 
     // Set timer to default value
     tcb->t_rxtcur = TCPTV_SRTTDFLT;

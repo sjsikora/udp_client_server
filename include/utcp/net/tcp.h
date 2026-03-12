@@ -210,6 +210,7 @@ struct tcb {
     uint32_t cwnd;
     uint32_t ssthresh;
     uint8_t  t_dupacks; /* Number of consecutive duplicate ACKs */
+    uint32_t recover;   /* RFC 6582: snd_max at the time fast retransmit was triggered */
 
     enum tcp_ca_state                ca_state; // Congestion state
     const struct tcp_congestion_ops *cc_ops;   // Pointer to the active CC algorithm

@@ -3,8 +3,11 @@
 #include "utcp/config.h"
 #include "utcp/net/tcp.h"
 #include "utcp/utcp_output.h"
+#include "utils.h"
 #include <stdio.h>
 #include <zlog.h>
+
+int timeout_counter = 0;
 
 static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args) {
     switch (args->type) {
@@ -54,8 +57,13 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         break;
 
     case TCP_CC_EVENT_TIMEOUT:
+        ++timeout_counter;
         cc_timeout(tcb, args->data.timeout.flight_size);
         zlog_info(cc_logger, "TIMEOUT,%u,%u", tcb->cwnd, tcb->ssthresh);
+
+        if (timeout_counter == 2) {
+            err_sys("3 timeouts");
+        }
         break;
     }
 }
