@@ -17,6 +17,7 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         if (tcb->ca_state == TCP_CA_RECOVERY) {
             tcb->cwnd = tcb->ssthresh;
             tcb->ca_state = TCP_CA_OPEN;
+            zlog_info(cc_logger, "ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
             break;
         }
 

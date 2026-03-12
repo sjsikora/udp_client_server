@@ -63,7 +63,7 @@ void utcp_timers(struct tcb *tcb, int timer) {
          */
         tcb->t_rtt = 0;
 
-        // Pass dup ACK to the respective cong_control
+        // Pass RTO expire to the respective cong_control
         tcb->cc_ops->cong_control(tcb, &args);
 
         // Force retransmission

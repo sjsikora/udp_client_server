@@ -15,6 +15,12 @@ void cc_init(struct tcb *tcb) {
 }
 
 void cc_aimd(struct tcb *tcb, uint32_t acked) {
+
+    // If this is our first ack since timeout, we are all good.
+    if (tcb->ca_state == TCP_CA_LOSS) {
+        tcb->ca_state = TCP_CA_OPEN;
+    }
+
     uint32_t old_cwnd = tcb->cwnd;
     if (tcb->cwnd < tcb->ssthresh) {
         // We are within the Slow Start Phase
@@ -35,12 +41,6 @@ uint32_t cc_halve_ssthresh(uint32_t flight_size) {
 };
 
 void cc_timeout(struct tcb *tcb, uint32_t flight_size) {
-
-    // If this is our first ack since timeout, we are all good
-    if (tcb->ca_state == TCP_CA_LOSS) {
-        tcb->ca_state = TCP_CA_OPEN;
-    }
-
     tcb->ssthresh = cc_halve_ssthresh(flight_size);
     tcb->cwnd = MSS; // Hard drop to 1 MSS
     tcb->ca_state = TCP_CA_LOSS;
