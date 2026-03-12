@@ -147,6 +147,20 @@ struct tcp_congestion_ops {
 };
 
 /**
+ * @brief One entry in the out-of-order reassembly queue.
+ *
+ * Modeled after BSD 4.4 TCP's tcpqe.  The list is kept sorted in
+ * ascending sequence-number order so that consecutive entries can be
+ * drained into recv_buf in a single pass.
+ */
+struct tcpq_entry {
+    uint32_t           seq;  /* sequence number of the first byte */
+    uint32_t           len;  /* number of payload bytes */
+    uint8_t           *data; /* heap-allocated copy of the payload */
+    struct tcpq_entry *next; /* next entry in ascending seq order */
+};
+
+/**
  * @brief Transmission Control Block (TCB)
  *
  * The Transmission Control Block (TCB) is a collection of variables for
@@ -196,6 +210,7 @@ struct tcb {
     uint32_t cwnd;
     uint32_t ssthresh;
     uint8_t  t_dupacks; /* Number of consecutive duplicate ACKs */
+    uint32_t recover;   /* RFC 6582: snd_max at the time fast retransmit was triggered */
 
     enum tcp_ca_state                ca_state; // Congestion state
     const struct tcp_congestion_ops *cc_ops;   // Pointer to the active CC algorithm
@@ -226,6 +241,12 @@ struct tcb {
     uint8_t  recv_buf[RECV_BUF_SIZE];
     uint32_t recv_buf_head; // next byte to read
     uint32_t recv_buf_tail; // last received byte
+
+    /* Out-of-order reassembly queue (BSD-style tcpq).
+     * ooo_bytes counts against the advertised receive window so the
+     * sender cannot fill beyond what we can ultimately accept. */
+    struct tcpq_entry *ooo_head;  /* head of sorted OOO segment list */
+    uint32_t           ooo_bytes; /* total payload bytes in OOO queue */
 
     uint8_t snd_scale;     /* Window scale applied to incoming th_win (peer's shift) */
     uint8_t rcv_scale;     /* Window scale applied to outgoing th_win (our shift) */

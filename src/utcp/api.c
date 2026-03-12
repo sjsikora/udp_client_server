@@ -1,4 +1,6 @@
-#include "utcp/cc/reno_tahoe.h"
+#include "utcp/cc/new_reno.h"
+#include "utcp/cc/reno.h"
+#include "utcp/cc/tahoe.h"
 #include "utcp/net/timers.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -86,7 +88,8 @@ int utcp_socket(void) {
     pthread_cond_init(&tcb->cond_var, NULL);
 
     // tcb->cc_ops = &utcp_tahoe;
-    tcb->cc_ops = &utcp_reno;
+    // tcb->cc_ops = &utcp_reno;
+    tcb->cc_ops = &utcp_new_reno;
 
     // Set timer to default value
     tcb->t_rxtcur = TCPTV_SRTTDFLT;
@@ -183,8 +186,9 @@ int utcp_read(int fd, uint8_t *buf, size_t len) {
 
     // When the application has read the payload, we can free up the receieve window
     // that is advertised to the sender. Recalculate this here.
+    // ooo_bytes are reserved for OOO segments that will drain into recv_buf.
     uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
-    tcb->rcv_wnd = RECV_BUF_SIZE - bytes_in_buffer;
+    tcb->rcv_wnd = RECV_BUF_SIZE - bytes_in_buffer - tcb->ooo_bytes;
 
     // Silly window prevention with Classic Clark's algorithm: only send window update when
     // we can offer at least min(MSS, RECV_BUF_SIZE/2) worth of new space.

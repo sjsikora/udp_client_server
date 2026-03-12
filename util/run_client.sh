@@ -1,4 +1,4 @@
-bash reset_logs.sh
+bash util/reset_logs.sh
 make
 ./build/client
 

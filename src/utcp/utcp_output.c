@@ -185,24 +185,32 @@ int utcp_output(struct tcb *tcb) {
         // We only advance snd_nxt if we actually sent data or a SYN/FIN bit
         if (data_length > 0 || sending_new_syn_fin) {
             uint32_t consumed = data_length + (sending_new_syn_fin ? 1 : 0);
+
+            /**
+             * RTT Tracking (Karn's Algorithm): start timing this segment if and only if
+             *   (a) we are not already timing another segment  (t_rtt == 0), AND
+             *   (b) this is genuinely new, never-before-sent data  (snd_nxt == snd_max), AND
+             *   (c) we are sending actual payload, not a pure SYN/FIN control packet.
+             *
+             */
+            if (tcb->t_rtt == 0 && tcb->snd_nxt == tcb->snd_max && data_length > 0) {
+                tcb->t_rtseq = tcb->snd_nxt; /* first byte of this new segment */
+                tcb->t_rtt = 1;              /* start the slowtimo tick counter  */
+                dzlog_info("RTT: Tracking started | seq=%u len=%zu | "
+                           "srtt=%u ticks (%u ms) rttvar=%u ticks rxtcur=%d ticks (%d ms)",
+                           tcb->t_rtseq, data_length, tcb->t_srtt >> 3, (tcb->t_srtt >> 3) * TCP_TICK_MS,
+                           tcb->t_rttvar >> 2, tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
+            }
+
             tcb->snd_nxt += consumed;
 
             // Start the retransmission timer if it isn't already running
             if (tcb->t_timer[TCPT_REXMT] == 0) {
-                dzlog_debug("Arming REXMT timer to %d ticks", tcb->t_rxtcur);
+                dzlog_info("REXMT: Arming timer to %d ticks (%d ms) "
+                           "[rxtcur=%d rxtshift=%d]",
+                           tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS, tcb->t_rxtcur, tcb->t_rxtshift);
                 tcb->t_timer[TCPT_REXMT] = tcb->t_rxtcur;
             }
-
-            /**
-             * Start tracking this segment if it is brand new data we haven't sent before,
-             * and we don't have another timer waiting for us.
-             */
-            if (tcb->t_rtt == 0 && (tcb->snd_nxt == tcb->snd_max)) {
-                tcb->t_rtseq = tcb->snd_nxt - consumed; // Track the exact sequence number we just transmitted
-                tcb->t_rtt = 1;                         // Start the slowtimo tick counter
-                dzlog_debug("Started RTT tracking for seq %u", tcb->t_rtseq);
-            }
-
             dzlog_debug("Advancing snd_nxt by %u -> New snd_nxt=%u", consumed, tcb->snd_nxt);
 
             if (SEQ_GT(tcb->snd_nxt, tcb->snd_max)) {
@@ -275,9 +283,11 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
         memcpy((uint8_t *)&seg->hdr + sizeof(tcphdr), options, opt_len);
     }
 
-    // Window calculations
+    /* Window calculations.
+     * Subtract ooo_bytes so the sender cannot fill space that is already
+     * reserved by buffered out-of-order segments waiting to drain. */
     uint32_t bytes_in_buffer = tcb->recv_buf_tail - tcb->recv_buf_head;
-    uint32_t current_free_space = RECV_BUF_SIZE - bytes_in_buffer;
+    uint32_t current_free_space = RECV_BUF_SIZE - bytes_in_buffer - tcb->ooo_bytes;
 
     seg->hdr.th_win = htons(SET_SCALED_WIN(tcb, flags, current_free_space));
 

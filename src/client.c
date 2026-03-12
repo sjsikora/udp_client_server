@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <zlog.h>
-#define CHUNK_SIZE 1048576 // 64KB chunks for reading from disk
+#define CHUNK_SIZE 64000 // 64KB chunks for reading from disk
 
 int main() {
     init_zlog(1);
@@ -28,7 +28,7 @@ int main() {
     uint8_t *buffer = malloc(CHUNK_SIZE);
     size_t   n, total_sent = 0;
 
-    printf("Client: Starting 10MB transfer...\n");
+    printf("Client: Starting 1GB transfer...\n");
     while ((n = fread(buffer, 1, CHUNK_SIZE, fptr)) > 0) {
         utcp_send(fd, buffer, n);
         total_sent += n;

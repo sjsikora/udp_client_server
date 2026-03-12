@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <utcp/api.h>
 #include <zlog.h>
-#define TARGET_SIZE 1000000000 
+#define TARGET_SIZE 1000000000
 
 int main() {
     init_zlog(0);
@@ -20,7 +20,7 @@ int main() {
     uint8_t *recv_buff = malloc(65536);
     size_t   total_received = 0;
 
-    printf("Server: Ready. Receiving 10MB...\n");
+    printf("Server: Ready. Receiving 1GB...\n");
 
     while (total_received < TARGET_SIZE) {
         ssize_t n = utcp_read(fd, recv_buff, 65536);
