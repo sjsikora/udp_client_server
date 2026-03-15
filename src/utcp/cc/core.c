@@ -27,9 +27,12 @@ void cc_aimd(struct tcb *tcb, uint32_t acked) {
         tcb->cwnd += MIN(acked, MSS); // Per RFC 5681
         dzlog_debug("Slow Start: cwnd %u -> %u (ssthresh=%u)", old_cwnd, tcb->cwnd, tcb->ssthresh);
     } else {
+        // Apply RFC 3465 ABC cap: prevent explosive growth from huge cumulative ACKs.
+        uint32_t effective_acked = MIN(acked, tcb->cwnd);
+
         // Congestion Avoidance: RFC 5681 - increase proportional to bytes acked
         // cwnd += MSS * (acked / cwnd) -> scales correctly when ACKs cover > 1 MSS
-        tcb->cwnd += MAX(((uint64_t)acked * MSS) / tcb->cwnd, 1);
+        tcb->cwnd += MAX(((uint64_t)effective_acked * MSS) / tcb->cwnd, 1);
         dzlog_debug("Congestion Avoidance: cwnd %u -> %u", old_cwnd, tcb->cwnd);
     }
     zlog_info(cc_logger, "ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
@@ -41,7 +44,8 @@ uint32_t cc_halve_ssthresh(uint32_t flight_size) {
 };
 
 void cc_timeout(struct tcb *tcb, uint32_t flight_size) {
-    uint32_t new_ssthresh = cc_halve_ssthresh(flight_size);
+    uint32_t effective_flight = MIN(flight_size, tcb->cwnd); // snd_max may be way in the air, this will bound it
+    uint32_t new_ssthresh = cc_halve_ssthresh(effective_flight);
 
     /**
      * In a Reno loss event, we keep inflating the flight size. This means when we calculate the

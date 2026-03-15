@@ -542,13 +542,19 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
              * all the data moved out of the reassembly queue. */
             uint32_t pre_drain_rcv_nxt = tcb->rcv_nxt;
             drain_ooo_queue(tcb);
-            if (tcb->rcv_nxt != pre_drain_rcv_nxt) {
+
+            bool gap_filled = (tcb->rcv_nxt != pre_drain_rcv_nxt);
+
+            if (gap_filled) {
                 dzlog_info("OOO DRAIN: rcv_nxt advanced %u -> %u after hole filled.", pre_drain_rcv_nxt, tcb->rcv_nxt);
                 /* Wake readers again — more data is now available */
                 pthread_cond_broadcast(&tcb->cond_var);
-            }
 
-            if (tcb->t_dupacks > 0) {
+                dzlog_debug("Gap filled. Forcing immediate ACK per RFC 5681.");
+                tcb->t_flags &= ~TF_DELACK;
+                tcb->t_timer[TCPT_DELACK] = 0;
+                tcb->t_flags |= TF_ACKNOW;
+            } else if (tcb->t_dupacks > 0) {
                 /* We were receiving duplicate ACKs (peer has a gap). Force immediate
                  * ACK so the sender knows we received new data without extra delay. */
                 dzlog_debug("New data received while in dup-ACK state (%d dups). Forcing ACK.", tcb->t_dupacks);
