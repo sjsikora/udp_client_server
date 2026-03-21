@@ -51,11 +51,25 @@ static void process_window_option(tcphdr *hdr, struct tcb *tcb) {
                 break;
             }
 
+            if (opt_ptr + opt_len > opt_end) {
+                dzlog_error("Malformed TCP option: extends past header boundary");
+                break;
+            }
+
             if (opt_kind == TCPOPT_WINDOW && opt_len == TCPOLEN_WINDOW) {
                 tcb->snd_scale = opt_ptr[2];
                 tcb->scale_enabled = true;
                 dzlog_info("Window scaling is enabled and is %u", tcb->snd_scale);
             }
+
+            if (opt_kind == TCPOPT_TIMESTAMP && opt_len == TCPOLEN_TIMESTAMP) {
+                /* opt_ptr[2..5] = TSval from peer; store it to echo back as TSecr */
+                tcb->ts_recent = ((uint32_t)opt_ptr[2] << 24) | ((uint32_t)opt_ptr[3] << 16)
+                               | ((uint32_t)opt_ptr[4] <<  8) |  (uint32_t)opt_ptr[5];
+                tcb->ts_enabled = true;
+                dzlog_info("TS option parsed: ts_recent=%u", tcb->ts_recent);
+            }
+
             opt_ptr += opt_len;
         }
     }
@@ -348,7 +362,50 @@ static void drain_ooo_queue(struct tcb *tcb) {
     }
 }
 
+/**
+ * @brief Extract the TSecr field from the TCP Timestamp option of a received segment.
+ *
+ * Returns true and writes to *out_tsecr if the option is found.
+ * TSecr is the echoed sender timestamp — used to compute RTT as (now - TSecr).
+ */
+static bool extract_tsecr(tcphdr *hdr, uint32_t *out_tsecr) {
+    uint8_t hdr_bytes = (uint8_t)((hdr->th_off_flags >> 4) * 4);
+    if (hdr_bytes <= (uint8_t)sizeof(tcphdr))
+        return false;
+
+    uint8_t *p   = (uint8_t *)hdr + sizeof(tcphdr);
+    uint8_t *end = (uint8_t *)hdr + hdr_bytes;
+
+    while (p < end) {
+        if (*p == TCPOPT_EOL)
+            break;
+        if (*p == TCPOPT_NOP) {
+            p++;
+            continue;
+        }
+        if (p + 1 >= end)
+            break;
+        uint8_t kind = p[0];
+        uint8_t len  = p[1];
+        if (len < 2 || p + len > end)
+            break;
+        if (kind == TCPOPT_TIMESTAMP && len == TCPOLEN_TIMESTAMP) {
+            /* option layout: [kind(1), len(1), TSval(4), TSecr(4)]
+             * TSecr is at bytes [6..9] relative to option start */
+            *out_tsecr = ((uint32_t)p[6] << 24) | ((uint32_t)p[7] << 16)
+                       | ((uint32_t)p[8] <<  8) |  (uint32_t)p[9];
+            return true;
+        }
+        p += len;
+    }
+    return false;
+}
+
 static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ssize_t data_length) {
+    /* Update ts_recent from the incoming segment's timestamp option.
+     * This keeps ts_recent fresh so outgoing segments echo the correct TSecr. */
+    process_window_option(hdr, tcb);
+
     /* Handle Acknowledgement */
     uint32_t ack_num = hdr->th_ack;
 
@@ -382,25 +439,38 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         // Wake up any thread blocked in utcp_send waiting for a buffer
         pthread_cond_broadcast(&tcb->cond_var);
 
-        // If we were tracking a segment and this ACK acknowledges it, complete the measurement.
-        if (tcb->t_rtt != 0 && SEQ_GT(ack_num, tcb->t_rtseq)) {
-            /* Subtract 1 because t_rtt was initialised to 1 (not 0) in utcp_output,
-             * so the true elapsed ticks = t_rtt - 1. */
+        /* RTT measurement — prefer RFC 1323 timestamp path; fall back to tick counter */
+        uint32_t rtt_us_measured = 0;
+
+        if (tcb->ts_enabled) {
+            uint32_t tsecr = 0;
+            if (extract_tsecr(hdr, &tsecr) && tsecr != 0) {
+                uint64_t now_us = utcp_get_time_us();
+                rtt_us_measured = (uint32_t)(now_us - (uint64_t)tsecr);
+                dzlog_info("RTT [TS]: ack=%u tsecr=%u rtt_us=%u | "
+                           "old srtt=%u ticks (%u ms) old rxtcur=%d ticks (%d ms)",
+                           ack_num, tsecr, rtt_us_measured,
+                           tcb->t_srtt >> 3, (tcb->t_srtt >> 3) * TCP_TICK_MS,
+                           tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
+                utcp_xmit_timer(tcb, rtt_us_measured);
+                tcb->t_rtt = 0;
+                tcb->t_rxtshift = 0;
+            }
+        } else if (tcb->t_rtt != 0 && SEQ_GT(ack_num, tcb->t_rtseq)) {
+            /* Legacy tick-based fallback (Karn's algorithm, 10ms resolution) */
             int measured_rtt = (int)tcb->t_rtt - 1;
+            rtt_us_measured  = (uint32_t)measured_rtt * TCP_TICK_MS * 1000U;
             dzlog_info("RTT: ACK %u covers tracked seq=%u | measured=%d ticks (%d ms) | "
                        "old srtt=%u ticks (%u ms) old rxtcur=%d ticks (%d ms)",
                        ack_num, tcb->t_rtseq, measured_rtt, measured_rtt * TCP_TICK_MS, tcb->t_srtt >> 3,
                        (tcb->t_srtt >> 3) * TCP_TICK_MS, tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
-
-            utcp_xmit_timer(tcb, measured_rtt);
-
+            utcp_xmit_timer(tcb, rtt_us_measured);
             dzlog_info("RTT: After update | srtt=%u ticks (%u ms) rttvar=%u ticks (%u ms) "
                        "rxtcur=%d ticks (%d ms)",
                        tcb->t_srtt >> 3, (tcb->t_srtt >> 3) * TCP_TICK_MS, tcb->t_rttvar >> 2,
                        (tcb->t_rttvar >> 2) * TCP_TICK_MS, tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
-
-            tcb->t_rtt = 0;      /* clear so we can time a new segment          */
-            tcb->t_rxtshift = 0; /* successful ACK: reset exponential-backoff    */
+            tcb->t_rtt = 0;
+            tcb->t_rxtshift = 0;
         }
 
         // Retransmission timer management.
@@ -435,6 +505,7 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
         struct cc_event_args args;
         args.type = TCP_CC_EVENT_ACK;
         args.data.ack.acked_bytes = newly_acked_bytes;
+        args.data.ack.rtt_us      = rtt_us_measured;
 
         tcb->cc_ops->cong_control(tcb, &args);
 
@@ -622,8 +693,15 @@ static void deserialize_utcp_packet(uint8_t *buff, size_t buf_len, tcphdr **out_
     (*out_hdr)->th_sum = ntohs((*out_hdr)->th_sum);
     (*out_hdr)->th_urp = ntohs((*out_hdr)->th_urp);
 
-    *out_data = buff + sizeof(tcphdr);
-    *out_data_len = buf_len - sizeof(tcphdr);
+    /* Use the data offset field to skip past any TCP options so that out_data
+     * points at the actual application payload, not at option bytes. */
+    uint8_t hdr_bytes = (uint8_t)(((*out_hdr)->th_off_flags >> 4) * 4);
+    if (hdr_bytes < (uint8_t)sizeof(tcphdr))
+        hdr_bytes = (uint8_t)sizeof(tcphdr);
+    *out_data     = buff + hdr_bytes;
+    *out_data_len = (ssize_t)buf_len - hdr_bytes;
+    if (*out_data_len < 0)
+        *out_data_len = 0;
 }
 
 /**

@@ -40,10 +40,13 @@ typedef struct {
     uint16_t th_urp; /* urgent pointer */
 } tcphdr;
 
-#define TCPOPT_EOL     0
-#define TCPOPT_NOP     1
-#define TCPOPT_WINDOW  3
-#define TCPOLEN_WINDOW 3
+#define TCPOPT_EOL          0
+#define TCPOPT_NOP          1
+#define TCPOPT_WINDOW       3
+#define TCPOLEN_WINDOW      3
+#define TCPOPT_TIMESTAMP    8
+#define TCPOLEN_TIMESTAMP   10
+#define TCPOLEN_TSTAMP_APPA 12 /* aligned block: NOP NOP TIMESTAMP 10 TSval(4) TSecr(4) */
 
 struct tcp_segment {
     tcphdr  hdr;
@@ -231,6 +234,10 @@ struct tcb {
     uint32_t t_rxtcur; /* The final calculated timeout value currently */
 
     uint8_t t_rxtshift; /* The number of retransmission timers that have exprired*/
+
+    /* RFC 1323 Timestamp Option state */
+    bool     ts_enabled; /* true once peer's SYN/SYN-ACK contained a timestamp option */
+    uint32_t ts_recent;  /* last TSval received from peer — echoed as TSecr on next send */
 
     /* Send buffer */
     uint8_t  send_buf[SEND_BUF_SIZE];

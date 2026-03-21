@@ -1,6 +1,8 @@
 #ifndef TIMERS_H
 #define TIMERS_H
 
+#include <stdint.h>
+
 struct tcb;
 
 /* In ms, how long is the slow tick timer. Down from 500ms */
@@ -40,6 +42,6 @@ extern const int tcp_backoff[];
  */
 void *utcp_slowtimo_thread(void *arg);
 
-void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks);
+void utcp_xmit_timer(struct tcb *tcb, uint32_t rtt_us);
 
 #endif
