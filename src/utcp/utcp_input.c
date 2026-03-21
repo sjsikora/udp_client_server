@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <utcp/api.h>
+#include <utcp/cc/logger.h>
 #include <utcp/net/tcp.h>
 #include <utcp/net/timers.h>
 #include <utcp/utcp_init.h>
@@ -508,6 +509,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
         tcb->cc_ops->cong_control(tcb, &args);
 
+        log_lstm_event(tcb, rtt_us_measured, newly_acked_bytes, false, false);
+
     } else if (ack_num == tcb->snd_una) {
         uint32_t current_scaled_win = GET_SCALED_WIN(tcb, hdr);
 
@@ -546,6 +549,8 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
 
             // Pass dup ACK to the respective cong_control
             tcb->cc_ops->cong_control(tcb, &args);
+
+            log_lstm_event(tcb, 0, 0, true, false);
         }
     }
 

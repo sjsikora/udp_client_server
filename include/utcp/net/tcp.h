@@ -262,6 +262,12 @@ struct tcb {
     /* Mutex locks */
     pthread_mutex_t lock;     // Protects this specific TCB
     pthread_cond_t  cond_var; // Used to wake up blocking API calls (read/accept/connect)
+
+    uint64_t min_rtt_seen_us;        /* running minimum RTT (µs); updated on each Karn-valid RTT sample */
+    uint64_t lstm_last_ts_us;        /* timestamp of last logged LSTM event, for inter-event delta */
+    uint32_t lstm_prev_rtt_us;       /* last instantaneous RTT sample (µs), for rtt_delta */
+    uint32_t lstm_prev_rto_us;       /* last RTO value (µs), for rto_delta */
+    int32_t  lstm_prev_rtt_delta_us; /* last rtt_delta (µs), for rtt_accel */
 };
 
 #endif
