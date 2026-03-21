@@ -38,8 +38,8 @@ int main() {
 
     printf("\nClient: Finished sending file (%zu bytes).\n", total_sent);
 
-    while (1) {
-    }
+    utcp_drain(fd);
+    printf("Client: All data acknowledged by receiver.\n");
 
     fclose(fptr);
     free(buffer);

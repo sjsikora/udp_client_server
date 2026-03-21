@@ -285,3 +285,15 @@ int utcp_listen(int fd) {
     tcb->state = TCP_LISTEN;
     return 0;
 }
+
+void utcp_drain(int fd) {
+    struct tcb *tcb = utcp_get_tcb(fd);
+
+    pthread_mutex_lock(&tcb->lock);
+
+    while (tcb->send_buf_head != tcb->send_buf_tail) {
+        pthread_cond_wait(&tcb->cond_var, &tcb->lock);
+    }
+
+    pthread_mutex_unlock(&tcb->lock);
+}
