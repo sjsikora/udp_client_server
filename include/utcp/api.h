@@ -95,4 +95,13 @@ void utcp_send(int fd, const void *buf, size_t len);
  */
 int utcp_read(int fd, uint8_t *buf, size_t len);
 
+/**
+ * @brief Block until all sent data has been acknowledged by the receiver.
+ *
+ * Sleeps the calling thread until the send buffer is fully drained
+ * (i.e. snd_una has caught up to snd_max). Returns immediately if
+ * there is nothing in-flight.
+ */
+void utcp_drain(int fd);
+
 #endif
