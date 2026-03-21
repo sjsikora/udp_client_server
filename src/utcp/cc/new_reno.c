@@ -36,6 +36,7 @@ static void new_reno_cong_control(struct tcb *tcb, const struct cc_event_args *a
                 uint32_t acked = args->data.ack.acked_bytes;
 
                 utcp_retransmit_segment(tcb, tcb->snd_una);
+                tcb->t_rtt = 0; /* Karn's: invalidate tick-based RTT sample on retransmit */
 
                 /* Deflate: remove acked bytes from the inflated window, then
                  * add one MSS for the segment we just retransmitted. */
@@ -67,6 +68,7 @@ static void new_reno_cong_control(struct tcb *tcb, const struct cc_event_args *a
                 tcb->recover = tcb->snd_max;
 
                 utcp_retransmit_segment(tcb, tcb->snd_una);
+                tcb->t_rtt = 0; /* Karn's: invalidate tick-based RTT sample on retransmit */
 
                 tcb->ca_state = TCP_CA_RECOVERY;
                 tcb->cwnd = tcb->ssthresh + 3 * MSS;
