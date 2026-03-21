@@ -454,7 +454,6 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
                            tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
                 utcp_xmit_timer(tcb, rtt_us_measured);
                 tcb->t_rtt = 0;
-                tcb->t_rxtshift = 0;
             }
         } else if (tcb->t_rtt != 0 && SEQ_GT(ack_num, tcb->t_rtseq)) {
             /* Legacy tick-based fallback (Karn's algorithm, 10ms resolution) */
@@ -470,13 +469,13 @@ static void handle_received_data(struct tcb *tcb, tcphdr *hdr, uint8_t *data, ss
                        tcb->t_srtt >> 3, (tcb->t_srtt >> 3) * TCP_TICK_MS, tcb->t_rttvar >> 2,
                        (tcb->t_rttvar >> 2) * TCP_TICK_MS, tcb->t_rxtcur, tcb->t_rxtcur * TCP_TICK_MS);
             tcb->t_rtt = 0;
-            tcb->t_rxtshift = 0;
         }
 
         // Retransmission timer management.
         if (tcb->snd_una == tcb->snd_max) {
             dzlog_info("REXMT: All data ACKed (snd_una=snd_max=%u). Disarming timer.", tcb->snd_una);
             tcb->t_timer[TCPT_REXMT] = 0;
+            tcb->t_rxtshift = 0; /* All data ACKed: safe to reset backoff state (Karn's) */
         } else {
             /*
              * Data is still in-flight. Rearm the timer.
