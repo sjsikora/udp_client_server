@@ -1,5 +1,6 @@
 #include "logging.h"
 #include "utcp/cc/logger.h"
+#include "utcp/cc/lstm_client.h"
 #include "utcp/net/tcp.h"
 #include "utcp/net/timers.h"
 #include "utcp/utcp_utils.h"
@@ -71,4 +72,21 @@ void log_lstm_event(struct tcb *tcb, uint32_t rtt_us, uint32_t newly_acked,
               (unsigned long long)inter_ack_us,
               (uint32_t)tcb->ca_state, (uint32_t)tcb->t_dupacks, (uint32_t)tcb->t_rxtshift,
               (uint32_t)is_dup_ack, (uint32_t)is_timeout);
+
+    /* Mirror the same row to the Python LSTM inference server (non-blocking).
+     * This call also drains any prediction bytes waiting in the socket buffer,
+     * so lstm_client_fired() reflects the latest state immediately after. */
+    lstm_client_send_row(now_us,
+                         rtt_us, srtt_us, rttvar_us, rto_us, min_rtt,
+                         queue_delay_us, rtt_delta_us, rtt_accel_us, rto_delta_us,
+                         tcb->cwnd, ssthresh_log, tcb->snd_wnd, flight_size, newly_acked,
+                         inter_ack_us,
+                         (uint32_t)tcb->ca_state, (uint32_t)tcb->t_dupacks,
+                         (uint32_t)tcb->t_rxtshift,
+                         (uint32_t)is_dup_ack, (uint32_t)is_timeout);
+
+    /* Always log when the LSTM fires, regardless of which CC algorithm is active.
+     * Acting on the prediction is the CC algorithm's responsibility. */
+    if (cc_logger && lstm_client_fired())
+        zlog_info(cc_logger, "LSTM_FIRED,%u,%u", tcb->cwnd, ssthresh_log);
 }

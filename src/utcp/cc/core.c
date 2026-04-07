@@ -1,4 +1,5 @@
 #include "logging.h"
+#include "utcp/cc/core.h"
 #include "utcp/config.h"
 #include "utcp/net/tcp.h"
 #include "utcp/utcp_output.h"

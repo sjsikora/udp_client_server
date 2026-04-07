@@ -1,5 +1,6 @@
 #include "logging.h"
 #include "utcp/api.h"
+#include "utcp/cc/lstm_client.h"
 #include "utcp/utcp_init.h"
 #include "utils.h"
 #include <arpa/inet.h>
@@ -11,6 +12,10 @@
 int main() {
     init_zlog(1);
     utcp_package_init(0);
+
+    /* Connect to the Python LSTM server (non-fatal if not running). */
+    if (lstm_client_init() < 0)
+        printf("Client: LSTM server not reachable — running without predictions.\n");
     int fd = utcp_socket();
 
     struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons(8292), .sin_addr.s_addr = htonl(INADDR_ANY)};
@@ -43,5 +48,6 @@ int main() {
 
     fclose(fptr);
     free(buffer);
+    lstm_client_close();
     return 0;
 }

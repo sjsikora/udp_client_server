@@ -1,3 +1,4 @@
+#include "utcp/cc/lstm_reno.h"
 #include "utcp/cc/new_reno.h"
 #include "utcp/cc/reno.h"
 #include "utcp/cc/tahoe.h"
@@ -90,6 +91,7 @@ int utcp_socket(void) {
     // tcb->cc_ops = &utcp_tahoe;
     // tcb->cc_ops = &utcp_reno;
     tcb->cc_ops = &utcp_new_reno;
+    // tcb->cc_ops = &utcp_lstm_reno;
 
     // Set timer to default value
     tcb->t_rxtcur = TCPTV_SRTTDFLT;
