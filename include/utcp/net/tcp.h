@@ -268,6 +268,7 @@ struct tcb {
     uint32_t lstm_prev_rtt_us;       /* last instantaneous RTT sample (µs), for rtt_delta */
     uint32_t lstm_prev_rto_us;       /* last RTO value (µs), for rto_delta */
     int32_t  lstm_prev_rtt_delta_us; /* last rtt_delta (µs), for rtt_accel */
+    uint8_t  lstm_prev_fired;        /* last seen lstm_client_fired() state, for rising-edge log */
 };
 
 #endif

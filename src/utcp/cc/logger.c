@@ -85,8 +85,11 @@ void log_lstm_event(struct tcb *tcb, uint32_t rtt_us, uint32_t newly_acked,
                          (uint32_t)tcb->t_rxtshift,
                          (uint32_t)is_dup_ack, (uint32_t)is_timeout);
 
-    /* Always log when the LSTM fires, regardless of which CC algorithm is active.
-     * Acting on the prediction is the CC algorithm's responsibility. */
-    if (cc_logger && lstm_client_fired())
+    /* Log LSTM_FIRED only on the 0→1 rising edge so that one log entry is
+     * emitted per model prediction, not once per ACK for the duration of the
+     * fired state.  Acting on the prediction is the CC algorithm's job. */
+    int cur_fired = lstm_client_fired();
+    if (cc_logger && cur_fired && !tcb->lstm_prev_fired)
         zlog_info(cc_logger, "LSTM_FIRED,%u,%u", tcb->cwnd, ssthresh_log);
+    tcb->lstm_prev_fired = (uint8_t)cur_fired;
 }

@@ -22,9 +22,10 @@ import argparse
 import numpy as np
 
 # ── Config (must match training notebook) ────────────────────────────────────
-BIN_SIZE_MS = 15      # ms per time bin
-SEQ_LEN     = 200     # 200 bins × 15 ms = 3 s lookback
-N_FEATURES  = 7
+BIN_SIZE_MS  = 15      # ms per time bin
+SEQ_LEN      = 200     # 200 bins × 15 ms = 3 s lookback
+N_FEATURES   = 7
+NORM_WARMUP  = 50      # ACK rows with valid min_rtt to collect before locking the baseline
 
 # Column order on the wire (matches logger.c format string — no zlog_ts)
 RAW_COLS = [
@@ -56,16 +57,19 @@ class BinAggregator:
 
     def __init__(self):
         # Fixed-length ring of completed bin feature vectors
-        self._bins = np.zeros((SEQ_LEN, N_FEATURES), dtype=np.float32)
+        self._bins     = np.zeros((SEQ_LEN, N_FEATURES), dtype=np.float32)
+        self._has_cong = np.zeros(SEQ_LEN, dtype=bool)   # per-bin congestion flag
         self._head  = 0          # next write position (circular)
         self._count = 0          # total bins ever completed
 
         self._cur_bin_id   = None
         self._cur_rows     = []  # raw parsed rows accumulating in current bin
 
-        # Running per-connection RTT baseline (min_rtt_us from TCB)
-        # Converges to the true baseline within a handful of ACKs.
-        self._norm_rtt = None
+        # Per-connection RTT normalization baseline.
+        # Matches training: collect NORM_WARMUP samples then lock in their
+        # median (training used median(min_rtt_us) over the full run).
+        self._norm_rtt         = None
+        self._norm_rtt_samples = []
 
     # ── public ───────────────────────────────────────────────────────────────
 
@@ -75,9 +79,10 @@ class BinAggregator:
         (and thus a new bin has been appended to the window).
         """
         min_rtt = vals[CI['min_rtt_us']]
-        if min_rtt > 0:
-            if self._norm_rtt is None or min_rtt < self._norm_rtt:
-                self._norm_rtt = min_rtt
+        if min_rtt > 0 and self._norm_rtt is None:
+            self._norm_rtt_samples.append(min_rtt)
+            if len(self._norm_rtt_samples) >= NORM_WARMUP:
+                self._norm_rtt = float(np.median(self._norm_rtt_samples))
 
         ts_us = vals[CI['timestamp_us']]
         bid   = int(ts_us / (BIN_SIZE_MS * 1000))
@@ -101,12 +106,14 @@ class BinAggregator:
 
     def get_sequence(self) -> np.ndarray:
         """Return (SEQ_LEN, N_FEATURES) in chronological order."""
-        if self._count < SEQ_LEN:
-            # Partial window: zero-pad the oldest slots (already zero)
-            order = [(self._head + i) % SEQ_LEN for i in range(SEQ_LEN)]
-        else:
-            order = [(self._head + i) % SEQ_LEN for i in range(SEQ_LEN)]
+        order = [(self._head + i) % SEQ_LEN for i in range(SEQ_LEN)]
         return self._bins[order]
+
+    def window_has_congestion(self) -> bool:
+        """True if any bin in the current SEQ_LEN window contains a congestion event.
+        Matches the training skip rule: windows overlapping ca_state>=3 or is_timeout>=1
+        were excluded from training, so the model has never learned to handle them."""
+        return bool(self._has_cong.any())
 
     # ── private ──────────────────────────────────────────────────────────────
 
@@ -138,7 +145,12 @@ class BinAggregator:
             np.clip(utilization,                    -10.0, 10.0),
         ], dtype=np.float32)
 
-        self._bins[self._head] = vec
+        is_cong = any(
+            r[CI['ca_state']] >= 3 or r[CI['is_timeout']] >= 1
+            for r in rows
+        )
+        self._bins[self._head]     = vec
+        self._has_cong[self._head] = is_cong
         self._head  = (self._head + 1) % SEQ_LEN
         self._count += 1
 
@@ -169,6 +181,7 @@ def serve(model_path: str, sock_path: str, threshold: float):
         agg       = BinAggregator()
         recv_buf  = ''
         last_byte = b'\x00'
+        cooldown  = 0   # bins remaining before next inference is allowed
 
         try:
             conn.settimeout(10.0)
@@ -196,13 +209,24 @@ def serve(model_path: str, sock_path: str, threshold: float):
                     bin_crossed = agg.push(vals)
 
                     if bin_crossed and agg.ready():
-                        seq = agg.get_sequence()         # (200, 7)
-                        x   = seq[np.newaxis, ...]       # (1, 200, 7)
-                        p   = float(model.predict(x, verbose=0)[0, 0])
-                        fired = p >= threshold
-                        last_byte = b'\x01' if fired else b'\x00'
-                        if fired:
-                            print(f'[FIRED] p={p:.3f}', flush=True)
+                        if cooldown > 0:
+                            cooldown -= 1
+                            last_byte = b'\x00'
+                        elif agg.window_has_congestion():
+                            # Window overlaps active recovery — outside training
+                            # distribution, suppress prediction.
+                            last_byte = b'\x00'
+                        else:
+                            seq = agg.get_sequence()         # (200, 7)
+                            x   = seq[np.newaxis, ...]       # (1, 200, 7)
+                            p   = float(model.predict(x, verbose=0)[0, 0])
+                            fired = p >= threshold
+                            if fired:
+                                cooldown  = SEQ_LEN  # silence for 3 s after firing
+                                last_byte = b'\x01'
+                                print(f'[FIRED] p={p:.3f}', flush=True)
+                            else:
+                                last_byte = b'\x00'
 
                     # Send latest fired byte after each row so C stays current
                     try:
