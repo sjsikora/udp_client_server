@@ -260,7 +260,7 @@ def serve(model_path: str, sock_path: str, threshold: float, cfg: dict, mode: st
         if prob_log:
             os.makedirs(os.path.dirname(prob_log), exist_ok=True)
             prob_log_f = open(prob_log, 'w')
-            prob_log_f.write('bin_start_us,probability,is_congestion,fired\n')
+            prob_log_f.write('bin_start_us,probability,is_congestion,fired,infer_ms\n')
 
         try:
             conn.settimeout(10.0)
@@ -341,7 +341,7 @@ def serve(model_path: str, sock_path: str, threshold: float, cfg: dict, mode: st
                         if prob_log_f:
                             prob_log_f.write(
                                 f'{agg.last_bin_ts_us},{p:.6f},'
-                                f'{int(is_cong)},{int(fired)}\n'
+                                f'{int(is_cong)},{int(fired)},{infer_ms:.3f}\n'
                             )
                             prob_log_f.flush()
 
