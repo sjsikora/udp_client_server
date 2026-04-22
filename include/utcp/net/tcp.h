@@ -40,10 +40,13 @@ typedef struct {
     uint16_t th_urp; /* urgent pointer */
 } tcphdr;
 
-#define TCPOPT_EOL     0
-#define TCPOPT_NOP     1
-#define TCPOPT_WINDOW  3
-#define TCPOLEN_WINDOW 3
+#define TCPOPT_EOL          0
+#define TCPOPT_NOP          1
+#define TCPOPT_WINDOW       3
+#define TCPOLEN_WINDOW      3
+#define TCPOPT_TIMESTAMP    8
+#define TCPOLEN_TIMESTAMP   10
+#define TCPOLEN_TSTAMP_APPA 12 /* aligned block: NOP NOP TIMESTAMP 10 TSval(4) TSecr(4) */
 
 struct tcp_segment {
     tcphdr  hdr;
@@ -232,6 +235,10 @@ struct tcb {
 
     uint8_t t_rxtshift; /* The number of retransmission timers that have exprired*/
 
+    /* RFC 1323 Timestamp Option state */
+    bool     ts_enabled; /* true once peer's SYN/SYN-ACK contained a timestamp option */
+    uint32_t ts_recent;  /* last TSval received from peer — echoed as TSecr on next send */
+
     /* Send buffer */
     uint8_t  send_buf[SEND_BUF_SIZE];
     uint32_t send_buf_head; // first unacked
@@ -255,6 +262,13 @@ struct tcb {
     /* Mutex locks */
     pthread_mutex_t lock;     // Protects this specific TCB
     pthread_cond_t  cond_var; // Used to wake up blocking API calls (read/accept/connect)
+
+    uint64_t min_rtt_seen_us;        /* running minimum RTT (µs); updated on each Karn-valid RTT sample */
+    uint64_t lstm_last_ts_us;        /* timestamp of last logged LSTM event, for inter-event delta */
+    uint32_t lstm_prev_rtt_us;       /* last instantaneous RTT sample (µs), for rtt_delta */
+    uint32_t lstm_prev_rto_us;       /* last RTO value (µs), for rto_delta */
+    int32_t  lstm_prev_rtt_delta_us; /* last rtt_delta (µs), for rtt_accel */
+    uint8_t  lstm_prev_fired;        /* last seen lstm_client_fired() state, for rising-edge log */
 };
 
 #endif

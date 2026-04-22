@@ -1,3 +1,4 @@
+#include "utcp/cc/lstm_reno.h"
 #include "utcp/cc/new_reno.h"
 #include "utcp/cc/reno.h"
 #include "utcp/cc/tahoe.h"
@@ -90,6 +91,7 @@ int utcp_socket(void) {
     // tcb->cc_ops = &utcp_tahoe;
     // tcb->cc_ops = &utcp_reno;
     tcb->cc_ops = &utcp_new_reno;
+    // tcb->cc_ops = &utcp_lstm_reno;
 
     // Set timer to default value
     tcb->t_rxtcur = TCPTV_SRTTDFLT;
@@ -284,4 +286,16 @@ int utcp_listen(int fd) {
     struct tcb *tcb = utcp_get_tcb_in_state(fd, TCP_CLOSED);
     tcb->state = TCP_LISTEN;
     return 0;
+}
+
+void utcp_drain(int fd) {
+    struct tcb *tcb = utcp_get_tcb(fd);
+
+    pthread_mutex_lock(&tcb->lock);
+
+    while (tcb->send_buf_head != tcb->send_buf_tail) {
+        pthread_cond_wait(&tcb->cond_var, &tcb->lock);
+    }
+
+    pthread_mutex_unlock(&tcb->lock);
 }

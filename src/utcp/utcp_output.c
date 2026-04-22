@@ -245,14 +245,48 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
      * variable
      */
     uint8_t opt_len = 0;
-    uint8_t options[4] = {0}; // Options must be padded to a 4-byte boundary
+    uint8_t options[16] = {0}; // Options must be padded to a 4-byte boundary
 
     if (flags & TH_SYN) {
+        /* Window scale option (4 bytes) */
         options[0] = TCPOPT_NOP;
         options[1] = TCPOPT_WINDOW;
         options[2] = TCPOLEN_WINDOW;
         options[3] = tcb->rcv_scale; // e.g., 4 (for a 2^4 = 16x multiplier)
-        opt_len = 4;
+        /* RFC 1323 Timestamp option (12 bytes): NOP NOP TIMESTAMP 10 TSval(4) TSecr(4) */
+        options[4]  = TCPOPT_NOP;
+        options[5]  = TCPOPT_NOP;
+        options[6]  = TCPOPT_TIMESTAMP;
+        options[7]  = TCPOLEN_TIMESTAMP;
+        uint32_t tsval = (uint32_t)utcp_get_time_us();
+        options[8]  = (tsval >> 24) & 0xFF;
+        options[9]  = (tsval >> 16) & 0xFF;
+        options[10] = (tsval >>  8) & 0xFF;
+        options[11] = tsval & 0xFF;
+        /* TSecr: echo peer's last TSval (0 on outgoing SYN — no peer TSval seen yet) */
+        uint32_t tsecr = tcb->ts_recent;
+        options[12] = (tsecr >> 24) & 0xFF;
+        options[13] = (tsecr >> 16) & 0xFF;
+        options[14] = (tsecr >>  8) & 0xFF;
+        options[15] = tsecr & 0xFF;
+        opt_len = 16;
+    } else {
+        /* RFC 1323 Timestamp option (12 bytes) on all data/ACK segments */
+        options[0] = TCPOPT_NOP;
+        options[1] = TCPOPT_NOP;
+        options[2] = TCPOPT_TIMESTAMP;
+        options[3] = TCPOLEN_TIMESTAMP;
+        uint32_t tsval = (uint32_t)utcp_get_time_us();
+        options[4]  = (tsval >> 24) & 0xFF;
+        options[5]  = (tsval >> 16) & 0xFF;
+        options[6]  = (tsval >>  8) & 0xFF;
+        options[7]  = tsval & 0xFF;
+        uint32_t tsecr = tcb->ts_recent;
+        options[8]  = (tsecr >> 24) & 0xFF;
+        options[9]  = (tsecr >> 16) & 0xFF;
+        options[10] = (tsecr >>  8) & 0xFF;
+        options[11] = tsecr & 0xFF;
+        opt_len = 12;
     }
 
     size_t              segment_size = sizeof(tcphdr) + data_length + opt_len;
@@ -273,12 +307,7 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
     uint8_t header_words = (sizeof(tcphdr) + opt_len) / 4;
     seg->hdr.th_off_flags = (header_words << 4) | (flags & 0x0F);
 
-    /**
-     * We don't overwrite the data in the payload because the packets that contain
-     * SYN don't have payload data. If we were going to further expand the options
-     * variable, we would def need a more robust handling. But since we are only
-     * commuicating window size, this is good for now.
-     */
+    /* Copy options into the buffer immediately after the fixed header */
     if (opt_len > 0) {
         memcpy((uint8_t *)&seg->hdr + sizeof(tcphdr), options, opt_len);
     }
@@ -291,14 +320,15 @@ static int utcp_send_segment(struct tcb *tcb, uint32_t seq, uint8_t flags, size_
 
     seg->hdr.th_win = htons(SET_SCALED_WIN(tcb, flags, current_free_space));
 
-    // Copy payload from the ring buffer based on the specific sequence number
+    // Copy payload from the ring buffer, past the option bytes to avoid overwriting them
+    uint8_t *payload_dst = (uint8_t *)&seg->hdr + sizeof(tcphdr) + opt_len;
     if (data_length > 0) {
         uint32_t logical_offset = seq - tcb->iss - 1; // Minus one because of SYN
 
-        ring_buf_read(tcb->send_buf, SEND_BUF_SIZE, logical_offset, seg->data, data_length);
+        ring_buf_read(tcb->send_buf, SEND_BUF_SIZE, logical_offset, payload_dst, data_length);
     }
 
-    debug_print_tcp_packet(&seg->hdr, true, seg->data, data_length);
+    debug_print_tcp_packet(&seg->hdr, true, payload_dst, data_length);
     int bytes_sent = pass_to_udp(seg, segment_size, tcb->dst_ip, tcb->dst_udp_port, (tcb->state == TCP_ESTABLISHED));
 
     free(seg);

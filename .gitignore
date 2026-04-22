@@ -13,3 +13,6 @@ out.txt
 *.txt
 mac-laptop.pem
 *.csv
+util/transmit.sh
+*.log
+data_analytics/.venv/*

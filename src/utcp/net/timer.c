@@ -1,7 +1,10 @@
+#include "logging.h"
+#include "utcp/cc/logger.h"
 #include "utcp/net/tcp.h"
 #include "utcp/net/timers.h"
 #include "utcp/utcp_init.h"
 #include "utcp/utcp_output.h"
+#include "utcp/utcp_utils.h"
 #include "utils.h"
 #include <stdio.h>
 #include <time.h>
@@ -50,6 +53,10 @@ void utcp_timers(struct tcb *tcb, int timer) {
         struct cc_event_args args;
         args.type = TCP_CC_EVENT_TIMEOUT;
         args.data.timeout.flight_size = tcb->snd_nxt - tcb->snd_una;
+
+        /* Log the timeout event BEFORE rolling back snd_nxt so that the logger
+         * reads the correct non-zero flight_size from the TCB. */
+        log_lstm_event(tcb, 0, 0, false, true);
 
         // Rollback the sequence pointers
         uint32_t pre_rollback_snd_nxt = tcb->snd_nxt;
@@ -174,7 +181,12 @@ void *utcp_slowtimo_thread(void *arg) {
     return NULL;
 }
 
-void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks) {
+void utcp_xmit_timer(struct tcb *tcb, uint32_t rtt_us) {
+    /* Convert microsecond sample to ticks for the EWMA algorithm */
+    int rtt_ticks = (int)(rtt_us / (TCP_TICK_MS * 1000U));
+    if (rtt_ticks < 1)
+        rtt_ticks = 1; /* minimum 1 tick; prevents EWMA collapsing to zero */
+
     uint32_t old_srtt_ticks = tcb->t_srtt >> 3;
     uint32_t old_rttvar_ticks = tcb->t_rttvar >> 2;
     uint32_t old_rxtcur = tcb->t_rxtcur;
@@ -240,4 +252,17 @@ void utcp_xmit_timer(struct tcb *tcb, int rtt_ticks) {
                (tcb->t_srtt >> 3) * TCP_TICK_MS, old_rttvar_ticks, tcb->t_rttvar >> 2, old_rttvar_ticks * TCP_TICK_MS,
                (tcb->t_rttvar >> 2) * TCP_TICK_MS, old_rxtcur, tcb->t_rxtcur, old_rxtcur * TCP_TICK_MS,
                tcb->t_rxtcur * TCP_TICK_MS);
+
+    /* Update running minimum RTT used by the LSTM logger for normalization.
+     * Only called on Karn-valid samples (caller already guards retransmits), so
+     * every sample reaching here is a trustworthy baseline candidate. */
+    if (tcb->min_rtt_seen_us == 0 || (uint64_t)rtt_us < tcb->min_rtt_seen_us)
+        tcb->min_rtt_seen_us = (uint64_t)rtt_us;
+
+    /* RTT time-series CSV row: seq, rtt_us, srtt_us, rttvar_us, rto_ms */
+    uint32_t srtt_us_log   = (tcb->t_srtt   >> 3) * TCP_TICK_MS * 1000;
+    uint32_t rttvar_us_log = (tcb->t_rttvar >> 2) * TCP_TICK_MS * 1000;
+    uint32_t rto_ms_log    = tcb->t_rxtcur  * TCP_TICK_MS;
+    zlog_info(rtt_logger, "%u,%u,%u,%u,%u",
+              tcb->t_rtseq, rtt_us, srtt_us_log, rttvar_us_log, rto_ms_log);
 }

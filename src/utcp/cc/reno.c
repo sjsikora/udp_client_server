@@ -60,10 +60,6 @@ static void reno_cong_control(struct tcb *tcb, const struct cc_event_args *args)
         ++timeout_counter;
         cc_timeout(tcb, args->data.timeout.flight_size);
         zlog_info(cc_logger, "TIMEOUT,%u,%u", tcb->cwnd, tcb->ssthresh);
-
-        if (timeout_counter == 2) {
-            err_sys("3 timeouts");
-        }
         break;
     }
 }

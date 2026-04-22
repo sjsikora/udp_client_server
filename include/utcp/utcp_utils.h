@@ -8,6 +8,7 @@
 #define UTCP_UTILS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <utcp/net/tcp.h>
 #include <zlog.h>
 
@@ -56,4 +57,10 @@ void ring_buf_read(const uint8_t *ring_buf, uint32_t buf_size, uint32_t offset, 
  * @brief Safely write to a circular ring buffer handling wrap-around.
  */
 void ring_buf_write(uint8_t *ring_buf, uint32_t buf_size, uint32_t offset, const uint8_t *src, size_t len);
+
+/**
+ * @brief Returns current CLOCK_MONOTONIC time in microseconds.
+ *        Used for RFC 1323 TCP Timestamp option encoding and RTT measurement.
+ */
+uint64_t utcp_get_time_us(void);
 #endif

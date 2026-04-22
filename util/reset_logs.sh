@@ -1,2 +1,3 @@
 rm log/app.log
-rm cwnd_output.csv
+rm log/data/cwnd_output.csv
+rm log/data/rtt_output.csv

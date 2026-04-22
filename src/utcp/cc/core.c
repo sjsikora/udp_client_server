@@ -1,4 +1,5 @@
 #include "logging.h"
+#include "utcp/cc/core.h"
 #include "utcp/config.h"
 #include "utcp/net/tcp.h"
 #include "utcp/utcp_output.h"
@@ -27,9 +28,12 @@ void cc_aimd(struct tcb *tcb, uint32_t acked) {
         tcb->cwnd += MIN(acked, MSS); // Per RFC 5681
         dzlog_debug("Slow Start: cwnd %u -> %u (ssthresh=%u)", old_cwnd, tcb->cwnd, tcb->ssthresh);
     } else {
+        // Apply RFC 3465 ABC cap: prevent explosive growth from huge cumulative ACKs.
+        uint32_t effective_acked = MIN(acked, tcb->cwnd);
+
         // Congestion Avoidance: RFC 5681 - increase proportional to bytes acked
         // cwnd += MSS * (acked / cwnd) -> scales correctly when ACKs cover > 1 MSS
-        tcb->cwnd += MAX(((uint64_t)acked * MSS) / tcb->cwnd, 1);
+        tcb->cwnd += MAX(((uint64_t)effective_acked * MSS) / tcb->cwnd, 1);
         dzlog_debug("Congestion Avoidance: cwnd %u -> %u", old_cwnd, tcb->cwnd);
     }
     zlog_info(cc_logger, "ACK,%u,%u", tcb->cwnd, tcb->ssthresh);
@@ -41,7 +45,19 @@ uint32_t cc_halve_ssthresh(uint32_t flight_size) {
 };
 
 void cc_timeout(struct tcb *tcb, uint32_t flight_size) {
-    tcb->ssthresh = cc_halve_ssthresh(flight_size);
+    uint32_t effective_flight = MIN(flight_size, tcb->cwnd); // snd_max may be way in the air, this will bound it
+    uint32_t new_ssthresh = cc_halve_ssthresh(effective_flight);
+
+    /**
+     * In a Reno loss event, we keep inflating the flight size. This means when we calculate the
+     * ssthresh, it may jump high because of our inflation. This guards against this by ensuring
+     * the ssthresh never increases on a loss event.
+     */
+    if ((tcb->ca_state == TCP_CA_RECOVERY || tcb->ca_state == TCP_CA_LOSS) && (new_ssthresh > tcb->ssthresh)) {
+        new_ssthresh = tcb->ssthresh;
+    }
+
+    tcb->ssthresh = new_ssthresh;
     tcb->cwnd = MSS; // Hard drop to 1 MSS
     tcb->ca_state = TCP_CA_LOSS;
     dzlog_warn("Timeout: Hard drop! flight_size=%u, new ssthresh=%u, cwnd=%u", flight_size, tcb->ssthresh, tcb->cwnd);
